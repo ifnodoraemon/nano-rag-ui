@@ -1,0 +1,74 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+  
+  --color-zinc-950: #050505;
+  --color-emerald-500: #10b981;
+  --color-emerald-600: #059669;
+}
+
+@layer base {
+  body {
+    @apply bg-[#050505] antialiased text-zinc-400;
+    font-feature-settings: "ss01", "ss02", "cv01", "cv02";
+  }
+}
+
+@layer utilities {
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  
+  .glass-panel {
+    @apply bg-zinc-900/40 backdrop-blur-md border border-zinc-800/50;
+  }
+  
+  .tech-border {
+    @apply border border-zinc-800/50 relative;
+  }
+  
+  .tech-border::before {
+    content: '';
+    @apply absolute -top-px -left-px w-2 h-2 border-t border-l border-emerald-500/50 pointer-events-none;
+  }
+  
+  .tech-border::after {
+    content: '';
+    @apply absolute -bottom-px -right-px w-2 h-2 border-b border-r border-emerald-500/50 pointer-events-none;
+  }
+
+  .markdown-body {
+    line-height: 1.6;
+    font-size: 13.5px;
+  }
+  .markdown-body p { margin-bottom: 0.75rem; }
+  .markdown-body p:last-child { margin-bottom: 0; }
+  .markdown-body h1, .markdown-body h2, .markdown-body h3 { 
+    font-weight: 700; 
+    margin-top: 1.25rem; 
+    margin-bottom: 0.5rem;
+    color: #f4f4f5;
+  }
+  .markdown-body ul, .markdown-body ol { 
+    margin-left: 1.25rem; 
+    margin-bottom: 0.75rem;
+    list-style-type: disc;
+  }
+  .markdown-body code {
+    @apply bg-zinc-800 text-emerald-400 px-1.5 py-0.5 rounded font-mono text-[0.9em];
+  }
+  .markdown-body pre {
+    @apply bg-black/50 border border-zinc-800/50 p-3 rounded-lg my-3 overflow-x-auto;
+  }
+  .markdown-body pre code {
+    @apply bg-transparent p-0 text-inherit;
+  }
+  .markdown-body strong { @apply text-zinc-100 font-bold; }
+  .markdown-body a { @apply text-emerald-500 underline underline-offset-4 decoration-emerald-500/30 hover:decoration-emerald-500 transition-all; }
+}

@@ -1,0 +1,6 @@
+{
+  "name": "NanoRAG",
+  "description": "A lightweight, browser-based RAG application for document analysis and technical Q&A using Gemini AI.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}
