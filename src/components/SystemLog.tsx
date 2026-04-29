@@ -1,14 +1,14 @@
 import React from 'react';
-import { globalStore } from '../lib/vector-store';
+import { eventBus } from '../lib/event-bus';
 import { Terminal, Clock } from 'lucide-react';
 import { cn } from '../lib/utils';
 
 export const SystemLog: React.FC = () => {
-  const [events, setEvents] = React.useState(() => globalStore.getEvents());
+  const [events, setEvents] = React.useState(() => eventBus.getEvents());
 
   React.useEffect(() => {
-    return globalStore.subscribe(() => {
-      setEvents([...globalStore.getEvents()]);
+    return eventBus.subscribe((newEvents) => {
+      setEvents([...newEvents]);
     });
   }, []);
 

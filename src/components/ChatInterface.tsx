@@ -3,14 +3,14 @@ import { Send, Bot, User, Loader2, Library, ThumbsUp, ThumbsDown, Activity, Info
 import { motion, AnimatePresence } from 'motion/react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { embedText, generateAnswer } from '../lib/gemini';
-import { globalStore } from '../lib/vector-store';
+import { chat, sendFeedback } from '../lib/api';
 import { cn } from '../lib/utils';
 import { useRagSettings } from '../lib/settings-store';
 
 interface RetrievalTrace {
-  latency: number;
-  results: { source: string, index: number, score: number }[];
+  latency?: number;
+  results: { source: string, index: string, score: number }[];
+  trace_id?: string;
 }
 
 interface Message {
@@ -60,27 +60,27 @@ export const ChatInterface: React.FC = () => {
     const startTime = performance.now();
 
     try {
-      const queryEmbedding = await embedText(input);
-      const searchResults = globalStore.search(queryEmbedding, settings.topK);
-      const searchEndTime = performance.now();
-      const latency = Math.round(searchEndTime - startTime);
+      const response = await chat({
+        query: input,
+        kb_id: settings.kbId,
+        session_id: settings.sessionId,
+        top_k: settings.topK,
+      });
 
-      const contextText = searchResults.map(r => r.chunk.text).join('\n\n---\n\n');
-      const history = messages.map(m => ({ role: m.role, text: m.text }));
-      
-      const answer = await generateAnswer(input, contextText, history);
+      const latency = Math.round(performance.now() - startTime);
 
-      if (answer) {
+      if (response && response.answer) {
         const botMessage: Message = {
           id: (Date.now() + 1).toString(),
           role: 'model',
-          text: answer,
+          text: response.answer,
           trace: {
             latency,
-            results: searchResults.map(r => ({ 
-              source: r.chunk.metadata.source, 
-              index: r.chunk.metadata.index,
-              score: r.score
+            trace_id: response.trace_id,
+            results: (response.citations || []).map(c => ({ 
+              source: c.source, 
+              index: c.chunk_id,
+              score: c.score ?? 0
             }))
           },
           feedback: null
@@ -92,7 +92,7 @@ export const ChatInterface: React.FC = () => {
       const errorMessage: Message = {
         id: (Date.now() + 1).toString(),
         role: 'model',
-        text: "Neural diagnostic failure. Connection to Gemini API interrupted or configuration error detected.",
+        text: "Neural diagnostic failure. Connection to backend API interrupted or configuration error detected.",
       };
       setMessages(prev => [...prev, errorMessage]);
     } finally {
@@ -100,10 +100,26 @@ export const ChatInterface: React.FC = () => {
     }
   };
 
-  const setFeedback = (msgId: string, rating: 'up' | 'down') => {
+  const handleFeedback = async (message: Message, rating: 'up' | 'down') => {
+    if (!message.trace || !message.trace.trace_id) return;
+    const newRating = message.feedback === rating ? null : rating;
     setMessages(prev => prev.map(m => 
-      m.id === msgId ? { ...m, feedback: m.feedback === rating ? null : rating } : m
+      m.id === message.id ? { ...m, feedback: newRating } : m
     ));
+    // Provide optimistic UI update above, then send to backend
+    if (newRating) {
+      try {
+        await sendFeedback({
+          trace_id: message.trace.trace_id,
+          rating: newRating,
+          kb_id: settings.kbId,
+          session_id: settings.sessionId,
+        });
+      } catch (err) {
+        console.error("Failed to submit feedback", err);
+        // revert on failure if needed, simplified for now
+      }
+    }
   };
 
   return (
@@ -189,7 +205,7 @@ export const ChatInterface: React.FC = () => {
                       {/* Interaction Area */}
                       <div className="flex items-center space-x-3">
                         <button 
-                          onClick={() => setFeedback(message.id, 'up')}
+                          onClick={() => handleFeedback(message, 'up')}
                           className={cn(
                             "p-1.5 rounded-lg border transition-all",
                             message.feedback === 'up' ? "bg-emerald-500/20 border-emerald-500 text-emerald-400" : "bg-zinc-900 border-zinc-800 text-zinc-600 hover:text-zinc-400"
@@ -198,7 +214,7 @@ export const ChatInterface: React.FC = () => {
                           <ThumbsUp className="w-3.5 h-3.5" />
                         </button>
                         <button 
-                          onClick={() => setFeedback(message.id, 'down')}
+                          onClick={() => handleFeedback(message, 'down')}
                           className={cn(
                             "p-1.5 rounded-lg border transition-all",
                             message.feedback === 'down' ? "bg-red-500/20 border-red-500 text-red-400" : "bg-zinc-900 border-zinc-800 text-zinc-600 hover:text-zinc-400"

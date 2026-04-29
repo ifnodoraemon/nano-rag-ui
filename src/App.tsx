@@ -8,16 +8,16 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { DocumentUploader } from './components/DocumentUploader';
 import { ChatInterface } from './components/ChatInterface';
 import { KnowledgeExplorer } from './components/KnowledgeExplorer';
-import { Evaluation } from './components/Evaluation';
 import { Settings } from './components/Settings';
 import { Cpu, Github, ExternalLink, Terminal, BarChart3 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { globalStore } from './lib/vector-store';
 import { cn } from './lib/utils';
+import { listDocuments, health } from './lib/api';
+import { useRagSettings } from './lib/settings-store';
 
 import { SystemLog } from './components/SystemLog';
 import { AreaChart, Area, ResponsiveContainer, YAxis } from 'recharts';
@@ -49,36 +49,57 @@ const LoadChart = () => (
 );
 
 export default function App() {
+  const [settings] = useRagSettings();
   const [dbStats, setDbStats] = useState({ 
     chunkCount: 0,
     sourceCount: 0,
     estimatedMem: '0 KB'
   });
-  const [activeTab, setActiveTab] = useState<'upload' | 'explorer' | 'eval' | 'settings'>('upload');
+  const [activeTab, setActiveTab] = useState<'upload' | 'explorer' | 'settings'>('upload');
+  const [backendHealth, setBackendHealth] = useState<'checking' | 'healthy' | 'error'>('checking');
 
-  const updateStats = () => {
-    const allChunks = globalStore.getAllChunks();
-    const sources = new Set(allChunks.map(c => c.metadata.source));
-    // Estimate memory: each embedding is 768 floats (4 bytes each)
-    const floatSize = 4;
-    const embeddingDim = 768;
-    const totalBytes = allChunks.length * embeddingDim * floatSize;
-    const memStr = totalBytes > 1024 * 1024 
-      ? `${(totalBytes / (1024 * 1024)).toFixed(2)} MB` 
-      : `${(totalBytes / 1024).toFixed(1)} KB`;
+  const updateStats = async () => {
+    try {
+      const docs = await listDocuments(settings.kbId);
+      const sourcesSize = docs.length;
+      let totalChunks = 0;
+      docs.forEach(d => totalChunks += d.chunk_count);
+      
+      const floatSize = 4;
+      const embeddingDim = 768;
+      const totalBytes = totalChunks * embeddingDim * floatSize;
+      const memStr = totalBytes > 1024 * 1024 
+        ? `${(totalBytes / (1024 * 1024)).toFixed(2)} MB` 
+        : `${(totalBytes / 1024).toFixed(1)} KB`;
 
-    setDbStats({
-      chunkCount: allChunks.length,
-      sourceCount: sources.size,
-      estimatedMem: memStr
-    });
+      setDbStats({
+        chunkCount: totalChunks,
+        sourceCount: sourcesSize,
+        estimatedMem: memStr
+      });
+    } catch (e) {
+      console.error(e);
+    }
   };
 
-  // Initial stats update
-  React.useEffect(() => {
+  const checkHealth = async () => {
+    try {
+      await health();
+      setBackendHealth('healthy');
+    } catch (e) {
+      setBackendHealth('error');
+    }
+  };
+
+  useEffect(() => {
     updateStats();
-    return globalStore.subscribe(updateStats);
-  }, []);
+    checkHealth();
+    const intervalId = setInterval(() => {
+      checkHealth();
+    }, 30000); // 30s poll
+    
+    return () => clearInterval(intervalId);
+  }, [settings.kbId]);
 
   return (
     <div className="min-h-screen bg-[#050505] text-zinc-300 font-sans selection:bg-emerald-500/30 selection:text-emerald-200 overflow-hidden">
@@ -102,17 +123,27 @@ export default function App() {
               <span className="text-[10px] text-zinc-600 font-mono uppercase tracking-widest pl-1">Ais-Build / Dev.V1</span>
               <div className="h-px w-6 bg-zinc-800" />
               <div className="flex items-center space-x-1">
-                <div className="w-1 h-1 rounded-full bg-emerald-500 animate-pulse" />
-                <span className="text-[10px] text-emerald-500/60 font-mono uppercase text-nowrap">系统就绪 / READY</span>
+                <div className={cn(
+                  "w-1 h-1 rounded-full animate-pulse",
+                  backendHealth === 'healthy' ? "bg-emerald-500" :
+                  backendHealth === 'error' ? "bg-red-500" : "bg-yellow-500"
+                )} />
+                <span className={cn(
+                  "text-[10px] uppercase font-mono text-nowrap",
+                  backendHealth === 'healthy' ? "text-emerald-500/60" :
+                  backendHealth === 'error' ? "text-red-500/60" : "text-yellow-500/60"
+                )}>
+                  {backendHealth === 'healthy' ? '系统就绪 / READY' :
+                   backendHealth === 'error' ? '系统异常 / ERROR' : '环境检测中 / INIT'}
+                </span>
               </div>
             </div>
           </header>
 
           <div className="flex-1 flex flex-col space-y-6 min-h-0 overflow-hidden">
-            <nav className="grid grid-cols-4 gap-1 p-1 bg-zinc-900/50 rounded-xl border border-zinc-800/50">
+            <nav className="grid grid-cols-3 gap-1 p-1 bg-zinc-900/50 rounded-xl border border-zinc-800/50">
               <NavButton active={activeTab === 'upload'} onClick={() => setActiveTab('upload')}>注入</NavButton>
               <NavButton active={activeTab === 'explorer'} onClick={() => setActiveTab('explorer')}>浏览</NavButton>
-              <NavButton active={activeTab === 'eval'} onClick={() => setActiveTab('eval')}>评测</NavButton>
               <NavButton active={activeTab === 'settings'} onClick={() => setActiveTab('settings')}>设置</NavButton>
             </nav>
 
@@ -127,7 +158,6 @@ export default function App() {
                 >
                   {activeTab === 'upload' && <DocumentUploader onProcessingComplete={updateStats} />}
                   {activeTab === 'explorer' && <KnowledgeExplorer onRefresh={updateStats} />}
-                  {activeTab === 'eval' && <Evaluation />}
                   {activeTab === 'settings' && <Settings />}
                 </motion.div>
               </AnimatePresence>

@@ -1,49 +1,41 @@
 import React, { useState, useRef } from 'react';
 import { Upload, FileText, CheckCircle2, Loader2, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { embedBatch } from '../lib/gemini';
-import { chunkText } from '../lib/chunker';
-import { globalStore, DocumentChunk } from '../lib/vector-store';
+import { ingestUpload } from '../lib/api';
 import { cn } from '../lib/utils';
+import { useRagSettings } from '../lib/settings-store';
 
 interface DocumentUploaderProps {
   onProcessingComplete: () => void;
 }
 
-import { useRagSettings } from '../lib/settings-store';
-
 export const DocumentUploader: React.FC<DocumentUploaderProps> = ({ onProcessingComplete }) => {
   const [settings] = useRagSettings();
   const [isUploading, setIsUploading] = useState(false);
-  const [files, setFiles] = useState<{ name: string; status: 'idle' | 'processing' | 'done' | 'error' }[]>([]);
+  const [filesStatus, setFilesStatus] = useState<{ name: string; status: 'idle' | 'processing' | 'done' | 'error' }[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const processFile = async (file: File) => {
-    setFiles(prev => [...prev, { name: file.name, status: 'processing' }]);
+  const processFiles = async (files: File[]) => {
+    const newFilesStatus = files.map(f => ({ name: f.name, status: 'processing' as const }));
+    setFilesStatus(prev => [...prev, ...newFilesStatus]);
     setIsUploading(true);
 
     try {
-      const text = await file.text();
-      const chunks = chunkText(text, settings.chunkSize, settings.overlap);
-      
-      const embeddings = await embedBatch(chunks);
-      
-      const documentChunks: DocumentChunk[] = chunks.map((content, i) => ({
-        id: `${file.name}-${i}`,
-        text: content,
-        embedding: embeddings[i],
-        metadata: {
-          source: file.name,
-          index: i
+      await ingestUpload(files, settings.kbId);
+      setFilesStatus(prev => prev.map(f => {
+        if (files.some(file => file.name === f.name)) {
+          return { ...f, status: 'done' as const };
         }
+        return f;
       }));
-
-      globalStore.addChunks(documentChunks);
-      
-      setFiles(prev => prev.map(f => f.name === file.name ? { ...f, status: 'done' } : f));
     } catch (error) {
-      console.error("Error processing file:", error);
-      setFiles(prev => prev.map(f => f.name === file.name ? { ...f, status: 'error' } : f));
+      console.error("Error processing files:", error);
+      setFilesStatus(prev => prev.map(f => {
+        if (files.some(file => file.name === f.name)) {
+          return { ...f, status: 'error' as const };
+        }
+        return f;
+      }));
     } finally {
       setIsUploading(false);
       onProcessingComplete();
@@ -52,15 +44,15 @@ export const DocumentUploader: React.FC<DocumentUploaderProps> = ({ onProcessing
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) {
-      Array.from(e.target.files).forEach(processFile);
+      processFiles(Array.from(e.target.files));
     }
   };
 
   const clearStore = () => {
-    globalStore.clear();
-    setFiles([]);
+    setFilesStatus([]);
     onProcessingComplete();
   };
+
 
   return (
     <div className="space-y-4">
@@ -93,7 +85,7 @@ export const DocumentUploader: React.FC<DocumentUploaderProps> = ({ onProcessing
       </div>
 
       <AnimatePresence>
-        {files.length > 0 && (
+        {filesStatus.length > 0 && (
           <motion.div 
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
@@ -110,7 +102,7 @@ export const DocumentUploader: React.FC<DocumentUploaderProps> = ({ onProcessing
               </button>
             </div>
             <div className="max-h-[200px] overflow-y-auto divide-y divide-zinc-800/50">
-              {files.map((file, idx) => (
+              {filesStatus.map((file, idx) => (
                 <div key={`${file.name}-${idx}`} className="p-3 flex items-center justify-between text-sm">
                   <div className="flex items-center space-x-3 truncate">
                     <FileText className="w-4 h-4 text-zinc-400 shrink-0" />
