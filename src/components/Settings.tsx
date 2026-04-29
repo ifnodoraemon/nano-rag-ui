@@ -1,16 +1,17 @@
 import React from 'react';
-import { Settings as SettingsIcon, Sliders, Cpu, HardDrive, Download, Database, Key } from 'lucide-react';
-import { useRagSettings } from '../lib/settings-store';
-import { listDocuments, getParsedDoc } from '../lib/api';
+import { Download, RotateCcw, SlidersHorizontal } from 'lucide-react';
+import { getParsedDoc, listDocuments } from '../lib/api';
 import { eventBus } from '../lib/event-bus';
+import { useRagSettings } from '../lib/settings-store';
 
 export const Settings: React.FC = () => {
   const [settings, setSettings] = useRagSettings();
 
   const handleExport = async () => {
+    if (!settings.workspaceId || !settings.kbId) return;
     try {
-      eventBus.emit('Starting knowledge base export...', 'info');
-      const docs = await listDocuments(settings.kbId);
+      eventBus.emit('正在导出当前知识范围', 'info');
+      const docs = await listDocuments(settings.kbId, settings.tenantId);
       const fullData = [];
       for (const doc of docs) {
         const parsed = await getParsedDoc(doc.doc_id);
@@ -20,99 +21,82 @@ export const Settings: React.FC = () => {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `nanorag_export_${settings.kbId}_${new Date().toISOString().split('T')[0]}.json`;
+      a.download = `nanorag_export_${settings.workspaceId}_${new Date().toISOString().split('T')[0]}.json`;
       a.click();
       URL.revokeObjectURL(url);
-      eventBus.emit('Knowledge base exported successfully', 'success');
-    } catch (e) {
-      console.error(e);
-      eventBus.emit('Export failed', 'error');
+      eventBus.emit('知识范围已导出', 'success');
+    } catch (error) {
+      console.error(error);
+      eventBus.emit('导出失败', 'error');
     }
   };
 
+  const resetSession = () => {
+    setSettings({ ...settings, sessionId: crypto.randomUUID() });
+  };
+
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between mb-6">
-        <div className="flex items-center space-x-2">
-          <SettingsIcon className="w-4 h-4 text-emerald-500" />
-          <h2 className="text-xs font-bold uppercase tracking-widest text-zinc-300">系统内核配置 / CONFIG</h2>
+    <div className="space-y-5">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h2 className="text-sm font-semibold text-slate-950">运行设置</h2>
+          <p className="mt-1 text-sm leading-6 text-slate-500">工作区来自后端真实数据；这里只保留检索参数和会话操作。</p>
         </div>
-        <button 
+        <button
+          type="button"
           onClick={handleExport}
-          className="flex items-center space-x-2 px-3 py-1.5 rounded-lg bg-zinc-900 border border-zinc-800 text-[9px] font-bold uppercase tracking-widest text-zinc-400 hover:text-emerald-500 hover:border-emerald-500/30 hover:bg-emerald-500/5 transition-all"
+          disabled={!settings.workspaceId}
+          className="inline-flex items-center gap-2 rounded-md border border-slate-200 px-3 py-2 text-xs font-medium text-slate-600 hover:bg-slate-50 hover:text-slate-950"
         >
-          <Download className="w-3 h-3" />
-          <span>导出知识库 / EXPORT</span>
+          <Download className="h-3.5 w-3.5" />
+          导出
         </button>
       </div>
 
-      <div className="grid grid-cols-1 gap-4">
-        {/* API Settings */}
-        <div className="p-4 rounded-xl bg-zinc-900/30 border border-zinc-800 space-y-4">
-          <div className="flex items-center space-x-2">
-            <Key className="w-3.5 h-3.5 text-zinc-500" />
-            <h3 className="text-[10px] font-bold uppercase text-zinc-400">认证配置 / AUTH</h3>
-          </div>
-          
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <label className="flex justify-between text-[10px] font-mono text-zinc-500 uppercase">
-                API 密钥 (X-API-Key)
-              </label>
-              <input 
-                type="password"
-                value={settings.apiKey}
-                onChange={(e) => setSettings({ ...settings, apiKey: e.target.value })}
-                placeholder="在此输入 API 密钥..."
-                className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2 text-xs text-zinc-300 focus:outline-none focus:border-emerald-500"
-              />
-            </div>
-            <div className="space-y-2">
-              <label className="flex justify-between text-[10px] font-mono text-zinc-500 uppercase">
-                知识库 ID / KB_ID
-              </label>
-              <input 
-                type="text"
-                value={settings.kbId}
-                onChange={(e) => setSettings({ ...settings, kbId: e.target.value })}
-                placeholder="default"
-                className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2 text-xs text-zinc-300 focus:outline-none focus:border-emerald-500"
-              />
-            </div>
-          </div>
+      <section className="rounded-lg border border-slate-200 bg-white p-4">
+        <div className="mb-4 flex items-center gap-2 text-sm font-semibold text-slate-900">
+          <SlidersHorizontal className="h-4 w-4 text-slate-500" />
+          检索
         </div>
+        <Field label={`top_k: ${settings.topK}`} hint="调用 /v1/rag/chat 时请求的上下文数量。">
+          <input
+            type="range"
+            min="1"
+            max="20"
+            step="1"
+            value={settings.topK}
+            onChange={(event) => setSettings({ ...settings, topK: Number(event.target.value) })}
+            className="w-full accent-slate-950"
+          />
+        </Field>
+      </section>
 
-        {/* Retrieval Settings */}
-        <div className="p-4 rounded-xl bg-zinc-900/30 border border-zinc-800 space-y-4">
-          <div className="flex items-center space-x-2">
-            <Cpu className="w-3.5 h-3.5 text-zinc-500" />
-            <h3 className="text-[10px] font-bold uppercase text-zinc-400">检索引擎 / ENGINE</h3>
+      <section className="rounded-lg border border-slate-200 bg-white p-4">
+        <div className="flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <div className="text-sm font-semibold text-slate-900">会话</div>
+            <div className="mt-1 truncate font-mono text-xs text-slate-500">{settings.sessionId}</div>
           </div>
-          
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <div className="flex justify-between text-[10px] font-mono">
-                <span className="text-zinc-500">Top-K 结果数量</span>
-                <span className="text-emerald-500">{settings.topK}</span>
-              </div>
-              <input 
-                type="range" min="1" max="10" step="1"
-                value={settings.topK}
-                onChange={(e) => setSettings({ ...settings, topK: parseInt(e.target.value) })}
-                className="w-full h-1 bg-zinc-800 rounded-lg appearance-none cursor-pointer accent-emerald-500"
-              />
-            </div>
-          </div>
+          <button
+            type="button"
+            onClick={resetSession}
+            className="inline-flex items-center gap-2 rounded-md border border-slate-200 px-3 py-2 text-xs font-medium text-slate-600 hover:bg-slate-50 hover:text-slate-950"
+          >
+            <RotateCcw className="h-3.5 w-3.5" />
+            重置
+          </button>
         </div>
-
-        <div className="p-4 flex items-center justify-between opacity-50 bg-zinc-900/10 border border-dashed border-zinc-800 rounded-xl">
-           <div className="flex items-center space-x-2">
-             <HardDrive className="w-3.5 h-3.5 text-zinc-600" />
-             <span className="text-[10px] font-mono text-zinc-600 italic">Session ID: {settings.sessionId?.substring(0, 8)}...</span>
-           </div>
-           <span className="text-[9px] text-zinc-700 bg-zinc-900 px-1 rounded uppercase">自动保存</span>
-        </div>
-      </div>
+      </section>
     </div>
   );
 };
+
+const Field = ({ children, hint, label }: { children: React.ReactNode; hint: string; label: string }) => (
+  <label className="block">
+    <div className="flex items-center justify-between gap-3 text-sm font-medium text-slate-800">
+      <span>{label}</span>
+    </div>
+    <div className="mt-2">{children}</div>
+    <div className="mt-1 text-xs leading-5 text-slate-500">{hint}</div>
+  </label>
+);

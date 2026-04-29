@@ -1,118 +1,190 @@
-import React, { useState, useRef } from 'react';
-import { Upload, FileText, CheckCircle2, Loader2, X } from 'lucide-react';
-import { motion, AnimatePresence } from 'motion/react';
-import { ingestUpload } from '../lib/api';
+import React, { useEffect, useRef, useState } from 'react';
+import { CheckCircle2, FileText, Loader2, Upload, XCircle } from 'lucide-react';
+import { AnimatePresence, motion } from 'motion/react';
+import { HealthDetail, IngestSourceSummary, ingestPath, ingestUpload, listIngestSources } from '../lib/api';
 import { cn } from '../lib/utils';
 import { useRagSettings } from '../lib/settings-store';
 
 interface DocumentUploaderProps {
+  health: HealthDetail | null;
   onProcessingComplete: () => void;
 }
 
-export const DocumentUploader: React.FC<DocumentUploaderProps> = ({ onProcessingComplete }) => {
+const parserBackedExtensions = new Set(['.pdf', '.png', '.jpg', '.jpeg', '.webp']);
+
+export const DocumentUploader: React.FC<DocumentUploaderProps> = ({ health, onProcessingComplete }) => {
   const [settings] = useRagSettings();
   const [isUploading, setIsUploading] = useState(false);
-  const [filesStatus, setFilesStatus] = useState<{ name: string; status: 'idle' | 'processing' | 'done' | 'error' }[]>([]);
+  const [sources, setSources] = useState<IngestSourceSummary[]>([]);
+  const [selectedSourcePath, setSelectedSourcePath] = useState('');
+  const [filesStatus, setFilesStatus] = useState<{ name: string; status: 'processing' | 'done' | 'error'; detail?: string }[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const loadSources = async () => {
+    const nextSources = await listIngestSources();
+    setSources(nextSources);
+  };
+
+  useEffect(() => {
+    loadSources();
+  }, []);
+
   const processFiles = async (files: File[]) => {
-    const newFilesStatus = files.map(f => ({ name: f.name, status: 'processing' as const }));
-    setFilesStatus(prev => [...prev, ...newFilesStatus]);
+    if (!files.length) return;
+    if (!settings.workspaceId || !settings.kbId) return;
+    const embeddingError = ingestReadinessError(health);
+    if (embeddingError) {
+      setFilesStatus((prev) => [...prev, ...files.map((file) => ({ name: file.name, status: 'error' as const, detail: embeddingError }))]);
+      return;
+    }
+    const parser = health?.providers?.document_parser;
+    const needsParser = files.some((file) => parserBackedExtensions.has(extensionOf(file.name)));
+    if (needsParser && parser?.enabled && parser.configured === false) {
+      const detail = '文档解析器未就绪，后端启动日志和健康检查已记录原因。';
+      setFilesStatus((prev) => [...prev, ...files.map((file) => ({ name: file.name, status: 'error' as const, detail }))]);
+      return;
+    }
+    setFilesStatus((prev) => [...prev, ...files.map((file) => ({ name: file.name, status: 'processing' as const }))]);
     setIsUploading(true);
 
     try {
-      await ingestUpload(files, settings.kbId);
-      setFilesStatus(prev => prev.map(f => {
-        if (files.some(file => file.name === f.name)) {
-          return { ...f, status: 'done' as const };
-        }
-        return f;
-      }));
+      const result = await ingestUpload(files, settings.kbId, settings.tenantId);
+      setFilesStatus((prev) => prev.map((item) => (
+        files.some((file) => file.name === item.name)
+          ? { ...item, status: 'done', detail: `${result.documents} docs / ${result.chunks} chunks` }
+          : item
+      )));
     } catch (error) {
-      console.error("Error processing files:", error);
-      setFilesStatus(prev => prev.map(f => {
-        if (files.some(file => file.name === f.name)) {
-          return { ...f, status: 'error' as const };
-        }
-        return f;
-      }));
+      const detail = error instanceof Error ? error.message : String(error);
+      setFilesStatus((prev) => prev.map((item) => (
+        files.some((file) => file.name === item.name)
+          ? { ...item, status: 'error', detail }
+          : item
+      )));
+    } finally {
+      setIsUploading(false);
+      onProcessingComplete();
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
+  const processPath = async () => {
+    const path = selectedSourcePath;
+    if (!path || isUploading || !settings.workspaceId || !settings.kbId) return;
+    const embeddingError = ingestReadinessError(health);
+    if (embeddingError) {
+      setFilesStatus((prev) => [...prev, { name: path, status: 'error', detail: embeddingError }]);
+      return;
+    }
+    setFilesStatus((prev) => [...prev, { name: path, status: 'processing' }]);
+    setIsUploading(true);
+    try {
+      const result = await ingestPath(path, settings.kbId, settings.tenantId);
+      setFilesStatus((prev) => prev.map((item) => (
+        item.name === path ? { ...item, status: 'done', detail: `${result.documents} 个文档 / ${result.chunks} 个分块` } : item
+      )));
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      setFilesStatus((prev) => prev.map((item) => (
+        item.name === path ? { ...item, status: 'error', detail } : item
+      )));
     } finally {
       setIsUploading(false);
       onProcessingComplete();
     }
   };
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files) {
-      processFiles(Array.from(e.target.files));
-    }
-  };
-
-  const clearStore = () => {
-    setFilesStatus([]);
-    onProcessingComplete();
-  };
-
-
   return (
-    <div className="space-y-4">
-      <div 
-        onClick={() => fileInputRef.current?.click()}
-        className={cn(
-          "tech-border rounded-xl p-8 bg-zinc-900/20 transition-all cursor-pointer group",
-          "hover:bg-zinc-900/40 active:scale-[0.98]",
-          isUploading ? "opacity-50 pointer-events-none" : ""
+    <div className="space-y-5">
+      <div>
+        <h2 className="text-sm font-semibold text-slate-950">文档注入</h2>
+        <p className="mt-1 text-sm leading-6 text-slate-500">把文件写入当前知识范围，后端会生成解析产物、分块并写入向量索引。</p>
+      </div>
+
+      <section className="rounded-lg border border-slate-200 bg-white p-4">
+        <div className="mb-3 text-sm font-semibold text-slate-900">服务器文件注入</div>
+        <div className="flex gap-2">
+          <select
+            value={selectedSourcePath}
+            onChange={(event) => setSelectedSourcePath(event.target.value)}
+            className="control font-mono"
+            disabled={sources.length === 0 || !settings.workspaceId}
+          >
+            <option value="">请选择服务器文件</option>
+            {sources.map((source) => (
+              <option key={source.path} value={source.path}>
+                {source.name}
+              </option>
+            ))}
+          </select>
+          <button type="button" onClick={processPath} disabled={!settings.workspaceId || !selectedSourcePath || isUploading} className="btn-primary shrink-0">
+            注入
+          </button>
+        </div>
+        {sources.length === 0 && (
+          <p className="mt-2 text-xs text-slate-500">后端当前没有返回可注入文件。</p>
         )}
-        id="drop-zone"
+      </section>
+
+      <button
+        type="button"
+        onClick={() => fileInputRef.current?.click()}
+        disabled={!settings.workspaceId || isUploading}
+        className={cn(
+          'flex w-full flex-col items-center justify-center rounded-lg border border-dashed border-slate-300 bg-slate-50 px-6 py-10 text-center transition-colors',
+          isUploading ? 'cursor-wait opacity-70' : 'hover:border-slate-500 hover:bg-white',
+        )}
       >
-        <input 
-          type="file" 
-          ref={fileInputRef} 
-          className="hidden" 
+        <input
+          type="file"
+          ref={fileInputRef}
+          className="hidden"
           accept=".pdf,.md,.txt,.html,.png,.jpg,.jpeg,.webp,.mp3,.wav,.mp4,.mov"
           multiple
-          onChange={handleFileChange}
+          onChange={(event) => processFiles(Array.from(event.target.files || []))}
         />
-        <div className="flex flex-col items-center justify-center space-y-3">
-          <div className="w-10 h-10 rounded-lg bg-zinc-900 flex items-center justify-center group-hover:shadow-[0_0_15px_rgba(39,39,42,0.5)] transition-all border border-zinc-800">
-            <Upload className="w-5 h-5 text-zinc-500 group-hover:text-emerald-500 transition-colors" />
-          </div>
-          <div className="text-center">
-            <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">开始注入数据</p>
-            <p className="text-[9px] text-zinc-600 mt-1 uppercase font-mono tracking-tighter">支持格式: PDF, MD, TXT, HTML, 图像, 音频, 视频</p>
-          </div>
+        <div className="flex h-11 w-11 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600">
+          {isUploading ? <Loader2 className="h-5 w-5 animate-spin" /> : <Upload className="h-5 w-5" />}
+        </div>
+        <div className="mt-4 text-sm font-medium text-slate-950">{isUploading ? '正在索引文件...' : '选择要上传的文件'}</div>
+        <div className="mt-1 text-xs text-slate-500">支持 PDF、Markdown、文本、HTML、图像、音频和视频</div>
+      </button>
+      {ingestReadinessError(health) && (
+        <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs leading-5 text-red-700">
+          当前不能注入：{ingestReadinessError(health)}
+        </div>
+      )}
+
+      <div className="rounded-lg border border-slate-200 bg-white p-3">
+        <div className="grid grid-cols-2 gap-3 text-xs">
+          <ScopeValue label="kb_id" value={settings.kbId || '未选择'} />
+          <ScopeValue label="tenant_id" value={settings.tenantId || '共享'} />
         </div>
       </div>
 
       <AnimatePresence>
         {filesStatus.length > 0 && (
-          <motion.div 
-            initial={{ opacity: 0, y: 10 }}
+          <motion.div
+            initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.95 }}
-            className="tech-border rounded-xl overflow-hidden glass-panel"
+            exit={{ opacity: 0, y: -8 }}
+            className="rounded-lg border border-slate-200 bg-white"
           >
-            <div className="p-3 border-b border-zinc-800/50 flex justify-between items-center bg-zinc-900/50">
-              <span className="text-xs font-mono uppercase tracking-wider text-zinc-500">已索引文件 / INDEXED</span>
-              <button 
-                onClick={clearStore}
-                className="text-[10px] text-zinc-500 hover:text-red-400 transition-colors uppercase font-bold"
-              >
-                全部清除 / CLEAR
-              </button>
+            <div className="flex items-center justify-between border-b border-slate-200 px-3 py-2">
+              <span className="text-xs font-semibold tracking-wide text-slate-500">最近注入</span>
+              <button type="button" onClick={() => setFilesStatus([])} className="text-xs font-medium text-slate-500 hover:text-slate-950">清空</button>
             </div>
-            <div className="max-h-[200px] overflow-y-auto divide-y divide-zinc-800/50">
-              {filesStatus.map((file, idx) => (
-                <div key={`${file.name}-${idx}`} className="p-3 flex items-center justify-between text-sm">
-                  <div className="flex items-center space-x-3 truncate">
-                    <FileText className="w-4 h-4 text-zinc-400 shrink-0" />
-                    <span className="truncate text-zinc-300">{file.name}</span>
+            <div className="max-h-64 overflow-y-auto divide-y divide-slate-100">
+              {filesStatus.map((file, index) => (
+                <div key={`${file.name}-${index}`} className="flex items-start gap-3 px-3 py-3">
+                  <FileText className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" />
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-sm font-medium text-slate-800">{file.name}</div>
+                    {file.detail && <div className="mt-0.5 truncate text-xs text-slate-500">{file.detail}</div>}
                   </div>
-                  <div className="flex items-center ml-2">
-                    {file.status === 'processing' && <Loader2 className="w-4 h-4 text-zinc-500 animate-spin" />}
-                    {file.status === 'done' && <CheckCircle2 className="w-4 h-4 text-emerald-500" />}
-                    {file.status === 'error' && <X className="w-4 h-4 text-red-500" />}
-                  </div>
+                  {file.status === 'processing' && <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-slate-400" />}
+                  {file.status === 'done' && <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />}
+                  {file.status === 'error' && <XCircle className="mt-0.5 h-4 w-4 shrink-0 text-red-600" />}
                 </div>
               ))}
             </div>
@@ -121,4 +193,25 @@ export const DocumentUploader: React.FC<DocumentUploaderProps> = ({ onProcessing
       </AnimatePresence>
     </div>
   );
+};
+
+const ScopeValue = ({ label, value }: { label: string; value: string }) => (
+  <div>
+    <div className="text-slate-500">{label}</div>
+    <div className="mt-1 truncate font-mono font-medium text-slate-900">{value}</div>
+  </div>
+);
+
+const extensionOf = (name: string) => {
+  const index = name.lastIndexOf('.');
+  return index >= 0 ? name.slice(index).toLowerCase() : '';
+};
+
+const ingestReadinessError = (health: HealthDetail | null) => {
+  if (!health) return '系统健康状态未加载。';
+  const embedding = health.gateway?.capabilities?.embedding;
+  if (!embedding?.reachable) {
+    return '后端健康检查显示 embedding provider 不可用。';
+  }
+  return null;
 };

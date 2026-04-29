@@ -1,8 +1,7 @@
-import React, { useState, useEffect } from 'react';
-import { listDocuments, getParsedDoc, DocumentSummary } from '../lib/api';
-import { Database, FileText, Trash2, Search, X, Info, ArrowLeft } from 'lucide-react';
-import { motion, AnimatePresence } from 'motion/react';
-import { cn } from '../lib/utils';
+import React, { useEffect, useMemo, useState } from 'react';
+import { ArrowLeft, Database, FileText, Loader2, Search, X } from 'lucide-react';
+import { AnimatePresence, motion } from 'motion/react';
+import { DocumentSummary, getParsedDoc, listDocuments } from '../lib/api';
 import { useRagSettings } from '../lib/settings-store';
 
 interface KnowledgeExplorerProps {
@@ -14,175 +13,174 @@ export const KnowledgeExplorer: React.FC<KnowledgeExplorerProps> = ({ onRefresh 
   const [searchTerm, setSearchTerm] = useState('');
   const [viewMode, setViewMode] = useState<'sources' | 'chunks'>('sources');
   const [sources, setSources] = useState<DocumentSummary[]>([]);
-  const [selectedDocId, setSelectedDocId] = useState<string | null>(null);
+  const [selectedDoc, setSelectedDoc] = useState<DocumentSummary | null>(null);
   const [chunks, setChunks] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(false);
 
-  useEffect(() => {
-    loadSources();
-  }, [settings.kbId, onRefresh]);
-
   const loadSources = async () => {
+    if (!settings.workspaceId || !settings.kbId) {
+      setSources([]);
+      setSelectedDoc(null);
+      setChunks([]);
+      setViewMode('sources');
+      return;
+    }
+    setIsLoading(true);
     try {
-      setIsLoading(true);
-      const docs = await listDocuments(settings.kbId);
-      setSources(docs || []);
-    } catch (e) {
-      console.error(e);
+      const docs = await listDocuments(settings.kbId, settings.tenantId);
+      setSources(docs);
+    } catch (error) {
+      console.error(error);
       setSources([]);
     } finally {
       setIsLoading(false);
     }
   };
 
-  const loadChunks = async (docId: string) => {
+  useEffect(() => {
+    loadSources();
+  }, [settings.kbId, settings.tenantId, onRefresh]);
+
+  const loadChunks = async (source: DocumentSummary) => {
+    setIsLoading(true);
     try {
-      setIsLoading(true);
-      const data = await getParsedDoc(docId);
-      setChunks(data?.chunks || []);
-      setSelectedDocId(docId);
+      const data = await getParsedDoc(source.doc_id);
+      setSelectedDoc(source);
+      setChunks(data.chunks);
       setViewMode('chunks');
-    } catch (e) {
-      console.error(e);
+    } catch (error) {
+      console.error(error);
       setChunks([]);
     } finally {
       setIsLoading(false);
     }
   };
 
-  const filteredSources = sources.filter(s => 
-    s.title.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const filteredSources = useMemo(() => {
+    const term = searchTerm.toLowerCase();
+    return sources.filter((source) => {
+      return source.title.toLowerCase().includes(term) || source.source_path.toLowerCase().includes(term);
+    });
+  }, [sources, searchTerm]);
 
-  const filteredChunks = chunks.filter(c => 
-    (c.text || '').toLowerCase().includes(searchTerm.toLowerCase())
-  ).slice(0, 50);
+  const filteredChunks = useMemo(() => {
+    const term = searchTerm.toLowerCase();
+    return chunks.filter((chunk) => (chunk.text || '').toLowerCase().includes(term)).slice(0, 80);
+  }, [chunks, searchTerm]);
 
   return (
-    <div className="flex flex-col space-y-4">
-      <div className="flex items-center justify-between">
-        <h2 className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 flex items-center gap-2">
-          {viewMode === 'chunks' ? (
-            <>
-              <button 
-                onClick={() => { setViewMode('sources'); setSelectedDocId(null); }}
-                className="hover:text-zinc-300 transition-colors"
-                title="Back to sources"
-              >
-                <ArrowLeft className="w-3 h-3" />
-              </button>
-              分块详情 / CHUNKS
-            </>
-          ) : (
-            <>
-              <Database className="w-3 h-3" />
-              知识库缓存 / NEURAL CACHE
-            </>
+    <div className="space-y-5">
+      <div>
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h2 className="text-sm font-semibold text-slate-950">{viewMode === 'sources' ? '知识库' : '解析分块'}</h2>
+            <p className="mt-1 text-sm leading-6 text-slate-500">
+              {viewMode === 'sources' ? '当前工作区内后端返回的文档。' : selectedDoc?.title}
+            </p>
+          </div>
+          {viewMode === 'chunks' && (
+            <button
+              type="button"
+              onClick={() => { setViewMode('sources'); setSelectedDoc(null); setChunks([]); }}
+              className="inline-flex items-center gap-2 rounded-md border border-slate-200 px-3 py-2 text-xs font-medium text-slate-600 hover:bg-slate-50 hover:text-slate-950"
+            >
+              <ArrowLeft className="h-3.5 w-3.5" />
+              返回
+            </button>
           )}
-        </h2>
+        </div>
       </div>
 
-      {viewMode === 'sources' && (
-        <div className="bg-zinc-800/30 border border-zinc-700/50 rounded-lg p-3 text-[11px] text-zinc-400 leading-relaxed font-sans flex items-start space-x-2">
-          <Info className="w-4 h-4 text-emerald-500 shrink-0 mt-0.5" />
-          <p>
-            <strong className="text-zinc-200">知识库缓存区</strong>展示了已注入系统并被向量化的文本数据。文档在上传后会被自动切分为<strong>分块 (Chunks)</strong>，点击文档可查看分块详情。
-          </p>
-        </div>
-      )}
-
       <div className="relative">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-zinc-600" />
-        <input 
+        <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+        <input
           type="text"
           value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
-          placeholder="搜索知识内容..."
-          className="w-full bg-zinc-900/50 border border-zinc-800 rounded-xl py-2.5 pl-9 pr-4 text-[11px] text-zinc-300 placeholder-zinc-700 focus:outline-none focus:border-emerald-600/30 transition-all"
+          onChange={(event) => setSearchTerm(event.target.value)}
+          placeholder={viewMode === 'sources' ? '搜索文档...' : '搜索分块...'}
+          className="h-10 w-full rounded-lg border border-slate-300 bg-white pl-9 pr-9 text-sm outline-none transition-colors placeholder:text-slate-400 focus:border-slate-950"
         />
         {searchTerm && (
-          <button 
-            onClick={() => setSearchTerm('')}
-            className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-600 hover:text-zinc-400"
-          >
-            <X className="w-3 h-3" />
+          <button type="button" onClick={() => setSearchTerm('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-900">
+            <X className="h-4 w-4" />
           </button>
         )}
       </div>
 
-      <div className="space-y-2 max-h-[400px] overflow-y-auto pr-2 scrollbar-hide">
-        {isLoading && viewMode === 'chunks' && <div className="text-[11px] text-zinc-500 text-center py-4">加载中...</div>}
-        <AnimatePresence mode="popLayout">
-          {viewMode === 'sources' ? (
-            filteredSources.map((source, i) => (
-              <motion.div
-                key={source.doc_id}
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, scale: 0.95 }}
-                onClick={() => loadChunks(source.doc_id)}
-                className="group p-3 rounded-lg bg-zinc-900/40 border border-zinc-800/50 hover:bg-zinc-900/60 transition-all cursor-pointer"
-              >
-                <div className="flex items-center justify-between mb-2">
-                  <div className="flex items-center space-x-2 min-w-0">
-                    <FileText className="w-3 h-3 text-emerald-500/50 shrink-0" />
-                    <span className="text-[11px] font-mono text-zinc-300 truncate font-bold">
-                      {source.title}
-                    </span>
-                  </div>
-                  <button 
-                    disabled
-                    className="opacity-0 group-hover:opacity-100 p-1.5 text-zinc-600 cursor-not-allowed"
-                    title="暂不支持删除单文档"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-                
-                <div className="flex items-center space-x-3">
-                  <div className="px-1.5 py-0.5 rounded bg-zinc-800/50 text-[9px] font-mono text-zinc-500 uppercase tracking-tighter">
-                    {source.chunk_count} Chunks
-                  </div>
-                  <div className="h-px flex-1 bg-zinc-800/30" />
-                  <div className="text-[9px] text-zinc-600 font-mono">
-                    {new Date(source.updated_at * (source.updated_at < 1e11 ? 1000 : 1)).toLocaleDateString()}
-                  </div>
-                </div>
-              </motion.div>
-            ))
-          ) : (
-            filteredChunks.map((chunk, i) => (
-              <motion.div
-                key={chunk.chunk_id || Math.random().toString()}
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, scale: 0.95 }}
-                className="p-3 rounded-lg bg-zinc-950 border border-zinc-900 hover:border-zinc-800 transition-all"
-              >
-                <div className="flex items-center justify-between mb-1.5">
-                  <span className="text-[9px] font-mono text-emerald-500/30">
-                    CHUNK_{chunk.chunk_id?.substring(0, 8)}
-                  </span>
-                </div>
-                <p className="text-[10px] text-zinc-400 leading-relaxed">
-                  {chunk.text}
-                </p>
-              </motion.div>
-            ))
-          )}
-        </AnimatePresence>
-        
-        {searchTerm && (viewMode === 'sources' ? filteredSources : filteredChunks).length === 0 && (
-          <div className="py-10 text-center">
-            <p className="text-[11px] text-zinc-600 font-mono italic">未找到匹配 / NO_MATCH</p>
+      <div className="min-h-[280px] space-y-2">
+        {isLoading && (
+          <div className="flex items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white py-10 text-sm text-slate-500">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            加载中
           </div>
         )}
-        {!searchTerm && viewMode === 'sources' && sources.length === 0 && !isLoading && (
-          <div className="py-10 text-center">
-            <p className="text-[11px] text-zinc-600 font-mono italic">缓存区为空 / DB_EMPTY</p>
-          </div>
+
+        {!isLoading && viewMode === 'sources' && (
+          <AnimatePresence mode="popLayout">
+            {filteredSources.map((source) => (
+              <motion.button
+                key={source.doc_id}
+                type="button"
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -8 }}
+                onClick={() => loadChunks(source)}
+                className="block w-full rounded-lg border border-slate-200 bg-white p-3 text-left transition-colors hover:border-slate-300 hover:bg-slate-50"
+              >
+                <div className="flex items-start gap-3">
+                  <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-slate-100 text-slate-500">
+                    <FileText className="h-4 w-4" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-sm font-medium text-slate-900">{source.title}</div>
+                    <div className="mt-1 truncate font-mono text-xs text-slate-500">{source.source_path}</div>
+                    <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-500">
+                      <span className="rounded bg-slate-100 px-2 py-0.5">{source.chunk_count} chunks</span>
+                      {source.doc_type && <span className="rounded bg-slate-100 px-2 py-0.5">{source.doc_type}</span>}
+                      {source.source_key && <span className="rounded bg-slate-100 px-2 py-0.5">{source.source_key}</span>}
+                    </div>
+                  </div>
+                </div>
+              </motion.button>
+            ))}
+          </AnimatePresence>
+        )}
+
+        {!isLoading && viewMode === 'chunks' && (
+          <AnimatePresence mode="popLayout">
+            {filteredChunks.map((chunk, index) => (
+              <motion.div
+                key={chunk.chunk_id}
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -8 }}
+                className="rounded-lg border border-slate-200 bg-white p-3"
+              >
+                <div className="mb-2 flex items-center justify-between gap-3 text-xs">
+                  <span className="truncate font-mono text-slate-500">{chunk.chunk_id}</span>
+                  <span className="shrink-0 rounded bg-slate-100 px-2 py-0.5 text-slate-500">{chunk.modality}</span>
+                </div>
+                <p className="text-sm leading-6 text-slate-700">{chunk.text}</p>
+              </motion.div>
+            ))}
+          </AnimatePresence>
+        )}
+
+        {!isLoading && viewMode === 'sources' && filteredSources.length === 0 && (
+          <EmptyState icon={Database} title={settings.workspaceId ? '暂无文档' : '未选择工作区'} detail={settings.workspaceId ? '后端当前工作区没有返回文档。' : '请选择后端返回的工作区后查看文档。'} />
+        )}
+        {!isLoading && viewMode === 'chunks' && filteredChunks.length === 0 && (
+          <EmptyState icon={FileText} title="暂无分块" detail="后端解析产物为空，或没有匹配当前搜索词。" />
         )}
       </div>
     </div>
   );
 };
+
+const EmptyState = ({ icon: Icon, title, detail }: { icon: React.ElementType; title: string; detail: string }) => (
+  <div className="rounded-lg border border-slate-200 bg-white px-4 py-10 text-center">
+    <Icon className="mx-auto h-5 w-5 text-slate-400" />
+    <div className="mt-3 text-sm font-medium text-slate-900">{title}</div>
+    <div className="mt-1 text-sm text-slate-500">{detail}</div>
+  </div>
+);
