@@ -1,11 +1,11 @@
 import { eventBus } from './event-bus';
 
-export interface ChatRequest { query: string; kb_id?: string; tenant_id?: string; session_id?: string; top_k?: number; metadata_filters?: any; }
-export interface Citation { citation_label?: string; chunk_id: string; source: string; score?: number; evidence_role?: string; span_text?: string; span_start?: number; span_end?: number; }
-export interface ChatResponse { answer: string; citations: Citation[]; contexts: any[]; trace_id: string; kb_id: string; tenant_id: string; session_id: string; }
-export interface IngestResponse { status: string; kb_id: string; tenant_id: string; documents: number; chunks: number; source: string; uploaded_files: string[]; }
-export interface FeedbackRequest { trace_id: string; rating: "up"|"down"; kb_id?: string; tenant_id?: string; session_id?: string; comment?: string; tags?: string[]; }
-export interface DocumentSummary { doc_id: string; title: string; source_path: string; kb_id: string; tenant_id: string; chunk_count: number; updated_at: string; doc_type?: string; source_key?: string; }
+export interface ChatRequest { query: string; kb_id?: string; tenant_id?: string | null; session_id?: string; top_k?: number; metadata_filters?: any; }
+export interface Citation { citation_label?: string; chunk_id: string; source: string; score?: number; evidence_role?: string; span_text?: string; span_start?: number; span_end?: number; modality?: string; media_uri?: string; }
+export interface ChatResponse { answer: string; citations: Citation[]; contexts: any[]; trace_id: string; kb_id: string | null; tenant_id: string | null; session_id: string | null; }
+export interface IngestResponse { status: string; kb_id: string; tenant_id: string | null; documents: number; chunks: number; source: string; uploaded_files: string[]; }
+export interface FeedbackRequest { trace_id: string; rating: "up"|"down"; kb_id?: string; tenant_id?: string | null; session_id?: string; comment?: string; tags?: string[]; }
+export interface DocumentSummary { doc_id: string; title: string; source_path: string; kb_id: string; tenant_id: string | null; chunk_count: number; updated_at: number; doc_type?: string; source_key?: string; }
 
 function getHeaders(isFormData = false): HeadersInit {
   const headers: Record<string, string> = {};
@@ -52,7 +52,7 @@ export async function ingestUpload(files: File[], kbId = "default"): Promise<Ing
   files.forEach(f => fd.append("files", f));
   fd.append("kb_id", kbId);
   eventBus.emit(`Uploading ${files.length} files to kb: ${kbId}...`, 'info');
-  const result = await fetchWithHandlers('/v1/rag/ingest', {
+  const result = await fetchWithHandlers('/v1/rag/ingest/upload', {
     method: 'POST',
     headers: getHeaders(true),
     body: fd,
@@ -89,7 +89,7 @@ export async function listDocuments(kbId = "default"): Promise<DocumentSummary[]
 }
 
 export async function getParsedDoc(docId: string): Promise<{document: any, chunks: any[]}> {
-  return await fetchWithHandlers(`/v1/rag/documents/${docId}`, { headers: getHeaders() });
+  return await fetchWithHandlers(`/debug/parsed/${docId}`, { headers: getHeaders() });
 }
 
 export async function health(): Promise<{status: string, components: any}> {

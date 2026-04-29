@@ -69,7 +69,7 @@ export const DocumentUploader: React.FC<DocumentUploaderProps> = ({ onProcessing
           type="file" 
           ref={fileInputRef} 
           className="hidden" 
-          accept=".txt,.md,.js,.ts,.tsx,.json"
+          accept=".pdf,.md,.txt,.html,.png,.jpg,.jpeg,.webp,.mp3,.wav,.mp4,.mov"
           multiple
           onChange={handleFileChange}
         />
@@ -79,7 +79,7 @@ export const DocumentUploader: React.FC<DocumentUploaderProps> = ({ onProcessing
           </div>
           <div className="text-center">
             <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">开始注入数据</p>
-            <p className="text-[9px] text-zinc-600 mt-1 uppercase font-mono tracking-tighter">支持格式: TXT, MD, JS, TS, JSON</p>
+            <p className="text-[9px] text-zinc-600 mt-1 uppercase font-mono tracking-tighter">支持格式: PDF, MD, TXT, HTML, 图像, 音频, 视频</p>
           </div>
         </div>
       </div>

@@ -1,15 +1,15 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, Bot, User, Loader2, Library, ThumbsUp, ThumbsDown, Activity, Info, Archive } from 'lucide-react';
+import { Send, Bot, User, Loader2, Library, ThumbsUp, ThumbsDown, Activity, Info, Archive, Image as ImageIcon, FileAudio, FileVideo } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { chat, sendFeedback } from '../lib/api';
+import { chat, sendFeedback, Citation } from '../lib/api';
 import { cn } from '../lib/utils';
 import { useRagSettings } from '../lib/settings-store';
 
 interface RetrievalTrace {
   latency?: number;
-  results: { source: string, index: string, score: number }[];
+  results: Citation[];
   trace_id?: string;
 }
 
@@ -77,11 +77,7 @@ export const ChatInterface: React.FC = () => {
           trace: {
             latency,
             trace_id: response.trace_id,
-            results: (response.citations || []).map(c => ({ 
-              source: c.source, 
-              index: c.chunk_id,
-              score: c.score ?? 0
-            }))
+            results: response.citations || []
           },
           feedback: null
         };
@@ -254,22 +250,31 @@ export const ChatInterface: React.FC = () => {
                           <div className="p-4 rounded-xl bg-black border border-zinc-900 space-y-4">
                             <h4 className="text-[10px] font-mono uppercase tracking-[0.2em] text-zinc-600 border-b border-zinc-900 pb-2">Retrieved Nodes / 检索分块</h4>
                             <div className="space-y-3">
-                              {message.trace.results.map((res, i) => (
+                              {message.trace.results.map((res, i) => {
+                                const Icon = res.modality === 'image' ? ImageIcon : res.modality === 'audio' ? FileAudio : res.modality === 'video' ? FileVideo : Library;
+                                const score = res.score ?? 0;
+                                return (
                                 <div key={i} className="flex flex-col space-y-1">
                                   <div className="flex items-center justify-between">
                                     <div className="flex items-center space-x-2">
-                                      <Library className="w-3 h-3 text-zinc-700" />
-                                      <span className="text-[10px] font-mono text-zinc-400 capitalize truncate max-w-[200px]">{res.source} [CH_{res.index}]</span>
+                                      <Icon className="w-3 h-3 text-zinc-700" />
+                                      <span className="text-[10px] font-mono text-zinc-400 capitalize truncate max-w-[200px]">{res.source} [CH_{res.chunk_id}]</span>
                                     </div>
                                     <div className="flex items-center space-x-3">
                                       <div className="w-16 h-1 bg-zinc-900 rounded-full overflow-hidden">
-                                        <div className="bg-emerald-500 h-full" style={{ width: `${res.score * 100}%` }} />
+                                        <div className="bg-emerald-500 h-full" style={{ width: `${score * 100}%` }} />
                                       </div>
-                                      <span className="text-[10px] font-mono text-emerald-500/70">{(res.score * 100).toFixed(1)}%</span>
+                                      <span className="text-[10px] font-mono text-emerald-500/70">{(score * 100).toFixed(1)}%</span>
                                     </div>
                                   </div>
+                                  {res.media_uri && (
+                                    <div className="text-[9px] text-zinc-500 font-mono truncate pl-5">
+                                      {res.media_uri}
+                                    </div>
+                                  )}
                                 </div>
-                              ))}
+                                );
+                              })}
                             </div>
                           </div>
                         </motion.div>

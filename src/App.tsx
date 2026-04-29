@@ -66,7 +66,7 @@ export default function App() {
       docs.forEach(d => totalChunks += d.chunk_count);
       
       const floatSize = 4;
-      const embeddingDim = 768;
+      const embeddingDim = 1536;
       const totalBytes = totalChunks * embeddingDim * floatSize;
       const memStr = totalBytes > 1024 * 1024 
         ? `${(totalBytes / (1024 * 1024)).toFixed(2)} MB` 

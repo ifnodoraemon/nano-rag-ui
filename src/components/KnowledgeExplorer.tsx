@@ -58,8 +58,6 @@ export const KnowledgeExplorer: React.FC<KnowledgeExplorerProps> = ({ onRefresh 
     (c.text || '').toLowerCase().includes(searchTerm.toLowerCase())
   ).slice(0, 50);
 
-  if (sources.length === 0 && !isLoading) return null;
-
   return (
     <div className="flex flex-col space-y-4">
       <div className="flex items-center justify-between">
@@ -147,7 +145,7 @@ export const KnowledgeExplorer: React.FC<KnowledgeExplorerProps> = ({ onRefresh 
                   </div>
                   <div className="h-px flex-1 bg-zinc-800/30" />
                   <div className="text-[9px] text-zinc-600 font-mono">
-                    {new Date(source.updated_at).toLocaleDateString()}
+                    {new Date(source.updated_at * (source.updated_at < 1e11 ? 1000 : 1)).toLocaleDateString()}
                   </div>
                 </div>
               </motion.div>
@@ -177,6 +175,11 @@ export const KnowledgeExplorer: React.FC<KnowledgeExplorerProps> = ({ onRefresh 
         {searchTerm && (viewMode === 'sources' ? filteredSources : filteredChunks).length === 0 && (
           <div className="py-10 text-center">
             <p className="text-[11px] text-zinc-600 font-mono italic">未找到匹配 / NO_MATCH</p>
+          </div>
+        )}
+        {!searchTerm && viewMode === 'sources' && sources.length === 0 && !isLoading && (
+          <div className="py-10 text-center">
+            <p className="text-[11px] text-zinc-600 font-mono italic">缓存区为空 / DB_EMPTY</p>
           </div>
         )}
       </div>
