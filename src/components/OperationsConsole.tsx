@@ -59,8 +59,8 @@ export const OperationsConsole: React.FC<OperationsConsoleProps> = ({ health, on
       {tab === 'overview' && <OverviewPanel health={health} />}
       {tab === 'retrieve' && <RetrievePanel kbId={settings.kbId} tenantId={settings.tenantId} topK={settings.topK} />}
       {tab === 'traces' && <TracePanel kbId={settings.kbId} tenantId={settings.tenantId} />}
-      {tab === 'eval' && <EvalPanel />}
-      {tab === 'diagnosis' && <DiagnosisPanel />}
+      {tab === 'eval' && <EvalPanel enabled={health?.features?.eval !== false} benchmarkEnabled={health?.features?.benchmark !== false} />}
+      {tab === 'diagnosis' && <DiagnosisPanel enabled={health?.features?.diagnosis !== false} />}
     </div>
   );
 };
@@ -204,7 +204,7 @@ const TracePanel = ({ kbId, tenantId }: { kbId: string; tenantId: string }) => {
   );
 };
 
-const EvalPanel = () => {
+const EvalPanel = ({ benchmarkEnabled, enabled }: { enabled: boolean; benchmarkEnabled: boolean }) => {
   const [datasets, setDatasets] = useState<any[]>([]);
   const [evalReports, setEvalReports] = useState<any[]>([]);
   const [benchmarkReports, setBenchmarkReports] = useState<any[]>([]);
@@ -251,8 +251,8 @@ const EvalPanel = () => {
             {datasets.map((dataset) => <option key={dataset.path} value={dataset.path}>{dataset.path}</option>)}
           </select>
           <div className="flex flex-wrap gap-2">
-            <button type="button" onClick={runSelectedEval} disabled={!datasetPath} className="btn-primary">运行评测</button>
-            <button type="button" onClick={runSelectedBenchmark} disabled={!datasetPath} className="btn-secondary">运行基准</button>
+            <button type="button" onClick={runSelectedEval} disabled={!enabled || !datasetPath} className="btn-primary">运行评测</button>
+            <button type="button" onClick={runSelectedBenchmark} disabled={!benchmarkEnabled || !datasetPath} className="btn-secondary">运行基准</button>
             <button type="button" onClick={load} className="btn-secondary">刷新报告</button>
           </div>
         </div>
@@ -265,7 +265,7 @@ const EvalPanel = () => {
   );
 };
 
-const DiagnosisPanel = () => {
+const DiagnosisPanel = ({ enabled }: { enabled: boolean }) => {
   const [settings] = useRagSettings();
   const [traceId, setTraceId] = useState('');
   const [reportPath, setReportPath] = useState('');
@@ -309,7 +309,7 @@ const DiagnosisPanel = () => {
             </option>
           ))}
         </select>
-        <button type="button" onClick={async () => setResult(await diagnoseTrace(traceId, includeAi))} disabled={!traceId.trim()} className="btn-primary">诊断追踪</button>
+        <button type="button" onClick={async () => setResult(await diagnoseTrace(traceId, includeAi))} disabled={!enabled || !traceId.trim()} className="btn-primary">诊断追踪</button>
         <div className="grid grid-cols-[1fr_88px] gap-2">
           <select value={reportPath} onChange={(event) => setReportPath(event.target.value)} className="control font-mono">
             <option value="">请选择评测报告</option>
@@ -322,8 +322,8 @@ const DiagnosisPanel = () => {
           <input type="number" min="0" value={resultIndex} onChange={(event) => setResultIndex(Number(event.target.value))} className="control font-mono" />
         </div>
         <div className="flex flex-wrap gap-2">
-          <button type="button" onClick={async () => setResult(await diagnoseEval(reportPath, resultIndex, includeAi))} disabled={!reportPath.trim()} className="btn-secondary">诊断评测样本</button>
-          <button type="button" onClick={async () => setResult(await diagnoseAuto(includeAi))} className="btn-secondary">自动诊断</button>
+          <button type="button" onClick={async () => setResult(await diagnoseEval(reportPath, resultIndex, includeAi))} disabled={!enabled || !reportPath.trim()} className="btn-secondary">诊断评测样本</button>
+          <button type="button" onClick={async () => setResult(await diagnoseAuto(includeAi))} disabled={!enabled} className="btn-secondary">自动诊断</button>
           <button type="button" onClick={loadOptions} className="btn-secondary">刷新选项</button>
         </div>
         <JsonBlock data={result} />
