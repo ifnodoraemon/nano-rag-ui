@@ -1,12 +1,13 @@
 import { eventBus } from './event-bus';
 
-export interface ChatRequest { query: string; kb_id?: string; tenant_id?: string | null; session_id?: string; top_k?: number; metadata_filters?: any; }
+export interface ChatRequest { query: string; kb_id?: string; session_id?: string; top_k?: number; metadata_filters?: any; }
 export interface Citation { citation_label?: string; chunk_id: string; source: string; score?: number; evidence_role?: string; span_text?: string; span_start?: number; span_end?: number; modality?: string; media_uri?: string; }
-export interface ChatResponse { answer: string; citations: Citation[]; contexts: any[]; trace_id: string; kb_id: string | null; tenant_id: string | null; session_id: string | null; }
-export interface IngestResponse { status: string; kb_id: string; tenant_id: string | null; documents: number; chunks: number; source: string; uploaded_files: string[]; }
-export interface FeedbackRequest { trace_id: string; rating: "up"|"down"; kb_id?: string; tenant_id?: string | null; session_id?: string; comment?: string; tags?: string[]; }
-export interface DocumentSummary { doc_id: string; title: string; source_path: string; kb_id: string; tenant_id: string | null; chunk_count: number; updated_at: number; doc_type?: string; source_key?: string; }
-export interface WorkspaceSummary { workspace_id: string; name: string; kb_id: string; tenant_id: string | null; document_count: number; chunk_count: number; trace_count: number; updated_at?: number | null; }
+export interface ChatResponse { answer: string; citations: Citation[]; contexts: any[]; trace_id: string; kb_id: string | null; session_id: string | null; }
+export interface IngestResponse { status: string; kb_id: string; documents: number; chunks: number; source: string; uploaded_files: string[]; }
+export interface FeedbackRequest { trace_id: string; rating: "up"|"down"; kb_id?: string; session_id?: string; comment?: string; tags?: string[]; }
+export interface DocumentSummary { doc_id: string; title: string; source_path: string; kb_id: string; chunk_count: number; updated_at: number; doc_type?: string; source_key?: string; }
+export interface KnowledgeBaseSummary { kb_id: string; name: string; description?: string | null; source: string; external_ref?: string | null; metadata: Record<string, any>; created_at: number; updated_at: number; document_count: number; chunk_count: number; trace_count: number; last_activity_at?: number | null; }
+export interface KnowledgeBaseCreateRequest { kb_id: string; name: string; description?: string | null; source?: string; external_ref?: string | null; metadata?: Record<string, any>; }
 export interface IngestSourceSummary { path: string; name: string; extension: string; size_bytes: number; updated_at: number; }
 export interface HealthSummary { status: string; auth_enabled?: boolean; auth_configured?: boolean; auth_status?: string; }
 export interface HealthDetail extends HealthSummary {
@@ -49,7 +50,6 @@ export interface TraceSummary {
   latency_seconds?: number | null;
   query?: string | null;
   kb_id?: string | null;
-  tenant_id?: string | null;
   session_id?: string | null;
   model_alias?: string | null;
   context_count?: number | null;
@@ -78,13 +78,7 @@ function getHeaders(isFormData = false): HeadersInit {
 
 const API_BASE = '';
 
-function scopedParams(kbId: string, tenantId?: string | null) {
-  const params = new URLSearchParams({ kb_id: kbId });
-  if (tenantId?.trim()) {
-    params.set('tenant_id', tenantId.trim());
-  }
-  return params;
-}
+const scopedParams = (kbId: string) => new URLSearchParams({ kb_id: kbId });
 
 async function fetchWithHandlers(url: string, options?: RequestInit) {
   try {
@@ -96,7 +90,7 @@ async function fetchWithHandlers(url: string, options?: RequestInit) {
       const errorText = await response.text();
       let errorMessage = `HTTP ${response.status} ${response.statusText}`;
       if (response.status === 401 || response.status === 403) {
-        errorMessage = '账号会话无权访问该接口。';
+        errorMessage = '当前请求无权访问该接口。';
       } else if (errorText) {
         try {
           const parsed = JSON.parse(errorText);
@@ -115,14 +109,11 @@ async function fetchWithHandlers(url: string, options?: RequestInit) {
   }
 }
 
-export async function ingestUpload(files: File[], kbId: string, tenantId?: string | null): Promise<IngestResponse> {
+export async function ingestUpload(files: File[], kbId: string): Promise<IngestResponse> {
   const fd = new FormData();
   files.forEach(f => fd.append("files", f));
   fd.append("kb_id", kbId);
-  if (tenantId?.trim()) {
-    fd.append("tenant_id", tenantId.trim());
-  }
-  eventBus.emit(`正在上传 ${files.length} 个文件到知识库 ${kbId}${tenantId ? ` / 租户 ${tenantId}` : ''}`, 'info');
+  eventBus.emit(`正在上传 ${files.length} 个文件到知识库 ${kbId}`, 'info');
   const result = await fetchWithHandlers('/v1/rag/ingest/upload', {
     method: 'POST',
     headers: getHeaders(true),
@@ -154,8 +145,8 @@ export async function sendFeedback(payload: FeedbackRequest): Promise<{status: s
   return result;
 }
 
-export async function listDocuments(kbId: string, tenantId?: string | null): Promise<DocumentSummary[]> {
-  const params = scopedParams(kbId, tenantId);
+export async function listDocuments(kbId: string): Promise<DocumentSummary[]> {
+  const params = scopedParams(kbId);
   return await fetchWithHandlers(`/v1/rag/documents?${params.toString()}`, { headers: getHeaders() });
 }
 
@@ -167,24 +158,33 @@ export async function health(): Promise<HealthSummary> {
   return await fetchWithHandlers('/health', { headers: getHeaders() });
 }
 
-export async function healthDetail(): Promise<HealthDetail> {
-  return await fetchWithHandlers('/health/detail', { headers: getHeaders() });
+export async function healthDetail(refresh = false): Promise<HealthDetail> {
+  const suffix = refresh ? '?refresh=true' : '';
+  return await fetchWithHandlers(`/health/detail${suffix}`, { headers: getHeaders() });
 }
 
-export async function listWorkspaces(): Promise<WorkspaceSummary[]> {
-  return await fetchWithHandlers('/v1/rag/workspaces', { headers: getHeaders() });
+export async function listKnowledgeBases(): Promise<KnowledgeBaseSummary[]> {
+  return await fetchWithHandlers('/v1/rag/knowledge-bases', { headers: getHeaders() });
+}
+
+export async function createKnowledgeBase(payload: KnowledgeBaseCreateRequest): Promise<KnowledgeBaseSummary> {
+  return await fetchWithHandlers('/v1/rag/knowledge-bases', {
+    method: 'POST',
+    headers: getHeaders(),
+    body: JSON.stringify({ source: 'local', metadata: {}, ...payload }),
+  });
 }
 
 export async function listIngestSources(): Promise<IngestSourceSummary[]> {
   return await fetchWithHandlers('/v1/rag/ingest/sources', { headers: getHeaders() });
 }
 
-export async function ingestPath(path: string, kbId: string, tenantId?: string | null): Promise<IngestResponse> {
+export async function ingestPath(path: string, kbId: string): Promise<IngestResponse> {
   eventBus.emit(`正在从路径注入：${path}`, 'info');
   const result = await fetchWithHandlers('/v1/rag/ingest', {
     method: 'POST',
     headers: getHeaders(),
-    body: JSON.stringify({ path, kb_id: kbId, tenant_id: tenantId ? tenantId : null }),
+    body: JSON.stringify({ path, kb_id: kbId }),
   });
   eventBus.emit(`路径注入完成：${result.documents} 个文档，${result.chunks} 个分块`, 'success');
   return result;
@@ -198,17 +198,15 @@ export async function retrieveDebug(payload: ChatRequest): Promise<RetrievalDebu
   });
 }
 
-export async function listTraces(kbId?: string, tenantId?: string | null, page = 1, pageSize = 20): Promise<PaginatedResponse<TraceSummary>> {
+export async function listTraces(kbId?: string, page = 1, pageSize = 20): Promise<PaginatedResponse<TraceSummary>> {
   const params = new URLSearchParams({ page: String(page), page_size: String(pageSize) });
   if (kbId) params.set('kb_id', kbId);
-  if (tenantId?.trim()) params.set('tenant_id', tenantId.trim());
   return await fetchWithHandlers(`/traces?${params.toString()}`, { headers: getHeaders() });
 }
 
-export async function getTrace(traceId: string, kbId?: string, tenantId?: string | null): Promise<TraceRecord> {
+export async function getTrace(traceId: string, kbId?: string): Promise<TraceRecord> {
   const params = new URLSearchParams();
   if (kbId) params.set('kb_id', kbId);
-  if (tenantId?.trim()) params.set('tenant_id', tenantId.trim());
   const suffix = params.toString() ? `?${params.toString()}` : '';
   return await fetchWithHandlers(`/traces/${traceId}${suffix}`, { headers: getHeaders() });
 }

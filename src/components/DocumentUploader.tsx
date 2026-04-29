@@ -31,7 +31,7 @@ export const DocumentUploader: React.FC<DocumentUploaderProps> = ({ health, onPr
 
   const processFiles = async (files: File[]) => {
     if (!files.length) return;
-    if (!settings.workspaceId || !settings.kbId) return;
+    if (!settings.kbId) return;
     const embeddingError = ingestReadinessError(health);
     if (embeddingError) {
       setFilesStatus((prev) => [...prev, ...files.map((file) => ({ name: file.name, status: 'error' as const, detail: embeddingError }))]);
@@ -48,7 +48,7 @@ export const DocumentUploader: React.FC<DocumentUploaderProps> = ({ health, onPr
     setIsUploading(true);
 
     try {
-      const result = await ingestUpload(files, settings.kbId, settings.tenantId);
+      const result = await ingestUpload(files, settings.kbId);
       setFilesStatus((prev) => prev.map((item) => (
         files.some((file) => file.name === item.name)
           ? { ...item, status: 'done', detail: `${result.documents} docs / ${result.chunks} chunks` }
@@ -70,7 +70,7 @@ export const DocumentUploader: React.FC<DocumentUploaderProps> = ({ health, onPr
 
   const processPath = async () => {
     const path = selectedSourcePath;
-    if (!path || isUploading || !settings.workspaceId || !settings.kbId) return;
+    if (!path || isUploading || !settings.kbId) return;
     const embeddingError = ingestReadinessError(health);
     if (embeddingError) {
       setFilesStatus((prev) => [...prev, { name: path, status: 'error', detail: embeddingError }]);
@@ -79,7 +79,7 @@ export const DocumentUploader: React.FC<DocumentUploaderProps> = ({ health, onPr
     setFilesStatus((prev) => [...prev, { name: path, status: 'processing' }]);
     setIsUploading(true);
     try {
-      const result = await ingestPath(path, settings.kbId, settings.tenantId);
+      const result = await ingestPath(path, settings.kbId);
       setFilesStatus((prev) => prev.map((item) => (
         item.name === path ? { ...item, status: 'done', detail: `${result.documents} 个文档 / ${result.chunks} 个分块` } : item
       )));
@@ -108,7 +108,7 @@ export const DocumentUploader: React.FC<DocumentUploaderProps> = ({ health, onPr
             value={selectedSourcePath}
             onChange={(event) => setSelectedSourcePath(event.target.value)}
             className="control font-mono"
-            disabled={sources.length === 0 || !settings.workspaceId}
+            disabled={sources.length === 0 || !settings.kbId}
           >
             <option value="">请选择服务器文件</option>
             {sources.map((source) => (
@@ -117,7 +117,7 @@ export const DocumentUploader: React.FC<DocumentUploaderProps> = ({ health, onPr
               </option>
             ))}
           </select>
-          <button type="button" onClick={processPath} disabled={!settings.workspaceId || !selectedSourcePath || isUploading} className="btn-primary shrink-0">
+          <button type="button" onClick={processPath} disabled={!settings.kbId || !selectedSourcePath || isUploading} className="btn-primary shrink-0">
             注入
           </button>
         </div>
@@ -129,7 +129,7 @@ export const DocumentUploader: React.FC<DocumentUploaderProps> = ({ health, onPr
       <button
         type="button"
         onClick={() => fileInputRef.current?.click()}
-        disabled={!settings.workspaceId || isUploading}
+        disabled={!settings.kbId || isUploading}
         className={cn(
           'flex w-full flex-col items-center justify-center rounded-lg border border-dashed border-slate-300 bg-slate-50 px-6 py-10 text-center transition-colors',
           isUploading ? 'cursor-wait opacity-70' : 'hover:border-slate-500 hover:bg-white',
@@ -158,7 +158,7 @@ export const DocumentUploader: React.FC<DocumentUploaderProps> = ({ health, onPr
       <div className="rounded-lg border border-slate-200 bg-white p-3">
         <div className="grid grid-cols-2 gap-3 text-xs">
           <ScopeValue label="kb_id" value={settings.kbId || '未选择'} />
-          <ScopeValue label="tenant_id" value={settings.tenantId || '共享'} />
+          <ScopeValue label="知识库" value={settings.kbName || settings.kbId || '未选择'} />
         </div>
       </div>
 

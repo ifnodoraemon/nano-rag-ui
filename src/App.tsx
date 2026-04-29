@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Activity, Database, FileUp, Github, Library, MessageSquareText, Settings as SettingsIcon, ShieldCheck, SlidersHorizontal } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { DocumentUploader } from './components/DocumentUploader';
@@ -8,8 +8,8 @@ import { Settings } from './components/Settings';
 import { SystemLog } from './components/SystemLog';
 import { OperationsConsole } from './components/OperationsConsole';
 import { cn } from './lib/utils';
-import { HealthDetail, WorkspaceSummary, healthDetail, listDocuments, listWorkspaces } from './lib/api';
-import { settingsForWorkspace, useRagSettings } from './lib/settings-store';
+import { HealthDetail, KnowledgeBaseSummary, createKnowledgeBase, health as healthSummary, healthDetail, listDocuments, listKnowledgeBases } from './lib/api';
+import { settingsForKnowledgeBase, useRagSettings } from './lib/settings-store';
 
 type ActiveTab = 'upload' | 'explorer' | 'operations' | 'settings';
 
@@ -17,29 +17,44 @@ export default function App() {
   const [settings, setSettings] = useRagSettings();
   const [activeTab, setActiveTab] = useState<ActiveTab>('upload');
   const [health, setHealth] = useState<HealthDetail | null>(null);
-  const [workspaces, setWorkspaces] = useState<WorkspaceSummary[]>([]);
+  const [knowledgeBases, setKnowledgeBases] = useState<KnowledgeBaseSummary[]>([]);
   const [docStats, setDocStats] = useState({ documents: 0, chunks: 0 });
+  const [newKbId, setNewKbId] = useState('');
+  const [newKbName, setNewKbName] = useState('');
+  const [isCreatingKb, setIsCreatingKb] = useState(false);
 
-  const scopeLabel = useMemo(() => {
-    const activeWorkspace = workspaces.find((workspace) => workspace.workspace_id === settings.workspaceId);
-    if (activeWorkspace) return activeWorkspace.name;
-    if (!settings.workspaceId) return '';
-    return settings.workspaceId;
-  }, [settings.workspaceId, workspaces]);
+  const activeKnowledgeBase = useMemo(() => {
+    return knowledgeBases.find((item) => item.kb_id === settings.kbId);
+  }, [settings.kbId, knowledgeBases]);
 
-  const refreshStatus = async () => {
-    const [detailResult, workspacesResult] = await Promise.allSettled([
-      healthDetail(),
-      listWorkspaces(),
+  const scopeLabel = activeKnowledgeBase?.name || settings.kbName || settings.kbId;
+
+  const refreshStatus = useCallback(async (mode: 'summary' | 'detail' = 'detail', forceDetailRefresh = false) => {
+    const [healthResult, knowledgeBasesResult] = await Promise.allSettled([
+      mode === 'detail' ? healthDetail(forceDetailRefresh) : healthSummary(),
+      listKnowledgeBases(),
     ]);
-    const detail = detailResult.status === 'fulfilled' ? detailResult.value : null;
-    const nextWorkspaces = workspacesResult.status === 'fulfilled' ? workspacesResult.value : workspaces;
-    if (detailResult.status === 'fulfilled') setHealth(detail);
-    if (workspacesResult.status === 'fulfilled') setWorkspaces(nextWorkspaces);
-    const activeWorkspace = nextWorkspaces.find((workspace) => workspace.workspace_id === settings.workspaceId);
-    if (activeWorkspace) {
+    if (healthResult.status === 'fulfilled') {
+      if (mode === 'detail') {
+        setHealth(healthResult.value as HealthDetail);
+      } else {
+        setHealth((prev) => ({ ...(prev ?? {}), ...healthResult.value }));
+      }
+    }
+    if (knowledgeBasesResult.status === 'fulfilled') {
+      const nextKnowledgeBases = knowledgeBasesResult.value;
+      setKnowledgeBases(nextKnowledgeBases);
+      const activeKb = nextKnowledgeBases.find((item) => item.kb_id === settings.kbId) || nextKnowledgeBases[0];
+      if (!settings.kbId && activeKb) {
+        setSettings(settingsForKnowledgeBase(settings, activeKb));
+      }
+    }
+    const activeKbId = knowledgeBasesResult.status === 'fulfilled'
+      ? (knowledgeBasesResult.value.find((item) => item.kb_id === settings.kbId) || knowledgeBasesResult.value[0])?.kb_id
+      : settings.kbId;
+    if (activeKbId) {
       try {
-        const docs = await listDocuments(activeWorkspace.kb_id, activeWorkspace.tenant_id);
+        const docs = await listDocuments(activeKbId);
         setDocStats({
           documents: docs.length,
           chunks: docs.reduce((sum, doc) => sum + doc.chunk_count, 0),
@@ -50,13 +65,30 @@ export default function App() {
     } else {
       setDocStats({ documents: 0, chunks: 0 });
     }
-  };
+  }, [setSettings, settings.kbId, settings.kbName, settings.sessionId, settings.topK]);
 
   useEffect(() => {
-    refreshStatus();
-    const intervalId = window.setInterval(refreshStatus, 30000);
+    refreshStatus('detail');
+    const intervalId = window.setInterval(() => refreshStatus('summary'), 30000);
     return () => window.clearInterval(intervalId);
-  }, [settings.workspaceId]);
+  }, [refreshStatus]);
+
+  const createKb = async () => {
+    const kbId = newKbId.trim();
+    const name = newKbName.trim() || kbId;
+    if (!kbId || isCreatingKb) return;
+    setIsCreatingKb(true);
+    try {
+      const created = await createKnowledgeBase({ kb_id: kbId, name });
+      setKnowledgeBases((prev) => [...prev.filter((item) => item.kb_id !== created.kb_id), created]);
+      setSettings(settingsForKnowledgeBase(settings, created));
+      setNewKbId('');
+      setNewKbName('');
+      await refreshStatus('detail', true);
+    } finally {
+      setIsCreatingKb(false);
+    }
+  };
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900">
@@ -112,7 +144,7 @@ export default function App() {
             <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
               <div className="min-w-0">
                 <div className="flex items-center gap-2 text-xs text-slate-500">
-                  <span>当前范围</span>
+                  <span>当前知识库</span>
                   <span className="rounded-md bg-slate-100 px-2 py-0.5 font-mono text-slate-700">{scopeLabel || '未选择'}</span>
                   {health?.auth_enabled === false && (
                     <span className="rounded-md bg-amber-50 px-2 py-0.5 text-amber-700">本地鉴权关闭</span>
@@ -121,21 +153,26 @@ export default function App() {
                 <h2 className="mt-1 text-xl font-semibold tracking-tight text-slate-950">RAG 运营台</h2>
               </div>
               <div className="min-w-[220px]">
-                <label className="text-xs text-slate-500">工作区</label>
+                <label className="text-xs text-slate-500">知识库</label>
                 <select
-                  value={settings.workspaceId}
+                  value={settings.kbId}
                   onChange={(event) => {
-                    const workspace = workspaces.find((item) => item.workspace_id === event.target.value);
-                    if (workspace) setSettings(settingsForWorkspace(settings, workspace));
+                    const kb = knowledgeBases.find((item) => item.kb_id === event.target.value);
+                    if (kb) setSettings(settingsForKnowledgeBase(settings, kb));
                   }}
-                  disabled={workspaces.length === 0}
+                  disabled={knowledgeBases.length === 0}
                   className="mt-1 h-10 w-full rounded-md border border-slate-300 bg-white px-3 text-sm text-slate-950 outline-none transition-colors focus:border-slate-950"
                 >
-                  <option value="">请选择工作区</option>
-                  {workspaces.map((workspace) => (
-                    <option key={workspace.workspace_id} value={workspace.workspace_id}>{workspace.name}</option>
+                  <option value="">请选择知识库</option>
+                  {knowledgeBases.map((kb) => (
+                    <option key={kb.kb_id} value={kb.kb_id}>{kb.name}</option>
                   ))}
                 </select>
+                <div className="mt-2 grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] gap-2">
+                  <input value={newKbId} onChange={(event) => setNewKbId(event.target.value)} placeholder="kb_id" className="h-9 rounded-md border border-slate-300 bg-white px-2 text-xs outline-none focus:border-slate-950" />
+                  <input value={newKbName} onChange={(event) => setNewKbName(event.target.value)} placeholder="名称" className="h-9 rounded-md border border-slate-300 bg-white px-2 text-xs outline-none focus:border-slate-950" />
+                  <button type="button" onClick={createKb} disabled={!newKbId.trim() || isCreatingKb} className="rounded-md bg-slate-950 px-3 text-xs font-medium text-white disabled:bg-slate-200 disabled:text-slate-400">新建</button>
+                </div>
               </div>
               <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
                 <Metric icon={Database} label="文档" value={String(docStats.documents)} />
@@ -163,9 +200,9 @@ export default function App() {
                     exit={{ opacity: 0, y: -8 }}
                     transition={{ duration: 0.16 }}
                   >
-                    {activeTab === 'upload' && <DocumentUploader health={health} onProcessingComplete={refreshStatus} />}
-                    {activeTab === 'explorer' && <KnowledgeExplorer onRefresh={refreshStatus} />}
-                    {activeTab === 'operations' && <OperationsConsole health={health} onRefresh={refreshStatus} />}
+                    {activeTab === 'upload' && <DocumentUploader health={health} onProcessingComplete={() => refreshStatus('detail', true)} />}
+                    {activeTab === 'explorer' && <KnowledgeExplorer />}
+                    {activeTab === 'operations' && <OperationsConsole health={health} onRefresh={() => refreshStatus('detail', true)} />}
                     {activeTab === 'settings' && <Settings />}
                   </motion.div>
                 </AnimatePresence>
@@ -233,6 +270,6 @@ const StatusRow = ({ label, value, tone }: { label: string; value?: string; tone
 const formatAuthStatus = (status?: string) => {
   if (status === 'disabled') return '已关闭';
   if (status === 'configured') return '已配置';
-  if (status === 'missing_keys') return '等待账号系统';
+  if (status === 'missing_keys') return '等待 API Key 或代理配置';
   return status;
 };

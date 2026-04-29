@@ -4,11 +4,7 @@ import { AnimatePresence, motion } from 'motion/react';
 import { DocumentSummary, getParsedDoc, listDocuments } from '../lib/api';
 import { useRagSettings } from '../lib/settings-store';
 
-interface KnowledgeExplorerProps {
-  onRefresh: () => void;
-}
-
-export const KnowledgeExplorer: React.FC<KnowledgeExplorerProps> = ({ onRefresh }) => {
+export const KnowledgeExplorer: React.FC = () => {
   const [settings] = useRagSettings();
   const [searchTerm, setSearchTerm] = useState('');
   const [viewMode, setViewMode] = useState<'sources' | 'chunks'>('sources');
@@ -18,7 +14,7 @@ export const KnowledgeExplorer: React.FC<KnowledgeExplorerProps> = ({ onRefresh 
   const [isLoading, setIsLoading] = useState(false);
 
   const loadSources = async () => {
-    if (!settings.workspaceId || !settings.kbId) {
+    if (!settings.kbId) {
       setSources([]);
       setSelectedDoc(null);
       setChunks([]);
@@ -27,7 +23,7 @@ export const KnowledgeExplorer: React.FC<KnowledgeExplorerProps> = ({ onRefresh 
     }
     setIsLoading(true);
     try {
-      const docs = await listDocuments(settings.kbId, settings.tenantId);
+      const docs = await listDocuments(settings.kbId);
       setSources(docs);
     } catch (error) {
       console.error(error);
@@ -39,7 +35,7 @@ export const KnowledgeExplorer: React.FC<KnowledgeExplorerProps> = ({ onRefresh 
 
   useEffect(() => {
     loadSources();
-  }, [settings.kbId, settings.tenantId, onRefresh]);
+  }, [settings.kbId]);
 
   const loadChunks = async (source: DocumentSummary) => {
     setIsLoading(true);
@@ -75,7 +71,7 @@ export const KnowledgeExplorer: React.FC<KnowledgeExplorerProps> = ({ onRefresh 
           <div>
             <h2 className="text-sm font-semibold text-slate-950">{viewMode === 'sources' ? '知识库' : '解析分块'}</h2>
             <p className="mt-1 text-sm leading-6 text-slate-500">
-              {viewMode === 'sources' ? '当前工作区内后端返回的文档。' : selectedDoc?.title}
+              {viewMode === 'sources' ? '当前知识库内后端返回的文档。' : selectedDoc?.title}
             </p>
           </div>
           {viewMode === 'chunks' && (
@@ -167,7 +163,7 @@ export const KnowledgeExplorer: React.FC<KnowledgeExplorerProps> = ({ onRefresh 
         )}
 
         {!isLoading && viewMode === 'sources' && filteredSources.length === 0 && (
-          <EmptyState icon={Database} title={settings.workspaceId ? '暂无文档' : '未选择工作区'} detail={settings.workspaceId ? '后端当前工作区没有返回文档。' : '请选择后端返回的工作区后查看文档。'} />
+          <EmptyState icon={Database} title={settings.kbId ? '暂无文档' : '未选择知识库'} detail={settings.kbId ? '后端当前知识库没有返回文档。' : '请选择或创建知识库后查看文档。'} />
         )}
         {!isLoading && viewMode === 'chunks' && filteredChunks.length === 0 && (
           <EmptyState icon={FileText} title="暂无分块" detail="后端解析产物为空，或没有匹配当前搜索词。" />

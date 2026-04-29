@@ -42,7 +42,7 @@ export const ChatInterface: React.FC = () => {
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
     const query = input.trim();
-    if (!query || isLoading || !settings.workspaceId || !settings.kbId) return;
+    if (!query || isLoading || !settings.kbId) return;
 
     setMessages((prev) => [...prev, { id: crypto.randomUUID(), role: 'user', text: query }]);
     setInput('');
@@ -53,7 +53,6 @@ export const ChatInterface: React.FC = () => {
       const response = await chat({
         query,
         kb_id: settings.kbId,
-        tenant_id: settings.tenantId ? settings.tenantId : null,
         session_id: settings.sessionId,
         top_k: settings.topK,
       });
@@ -88,7 +87,7 @@ export const ChatInterface: React.FC = () => {
   };
 
   const handleFeedback = async (message: Message, rating: 'up' | 'down') => {
-    if (!message.trace?.trace_id || !settings.workspaceId || !settings.kbId) return;
+    if (!message.trace?.trace_id || !settings.kbId) return;
     const nextRating = message.feedback === rating ? null : rating;
     setMessages((prev) => prev.map((item) => (item.id === message.id ? { ...item, feedback: nextRating } : item)));
     if (!nextRating) return;
@@ -97,7 +96,6 @@ export const ChatInterface: React.FC = () => {
         trace_id: message.trace.trace_id,
         rating: nextRating,
         kb_id: settings.kbId,
-        tenant_id: settings.tenantId ? settings.tenantId : null,
         session_id: settings.sessionId,
       });
     } catch (error) {
@@ -129,8 +127,8 @@ export const ChatInterface: React.FC = () => {
               <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500">
                 <Bot className="h-5 w-5" />
               </div>
-              <h3 className="mt-4 text-base font-semibold text-slate-950">{settings.workspaceId ? '输入一个制度或文档问题' : '请选择工作区'}</h3>
-              <p className="mt-2 text-sm text-slate-500">{settings.workspaceId ? '系统会基于当前工作区的后端数据回答。' : '工作区列表来自后端接口。'}</p>
+              <h3 className="mt-4 text-base font-semibold text-slate-950">{settings.kbId ? '输入一个制度或文档问题' : '请选择知识库'}</h3>
+              <p className="mt-2 text-sm text-slate-500">{settings.kbId ? '系统会基于当前知识库的后端数据回答。' : '知识库列表来自后端接口。'}</p>
             </div>
           </div>
         )}
@@ -220,18 +218,18 @@ export const ChatInterface: React.FC = () => {
             onChange={(event) => setInput(event.target.value)}
             placeholder="向当前知识范围提问..."
             className="h-12 w-full rounded-lg border border-slate-300 bg-white pl-4 pr-14 text-sm text-slate-950 outline-none transition-colors placeholder:text-slate-400 focus:border-slate-950"
-            disabled={!settings.workspaceId || isLoading}
+            disabled={!settings.kbId || isLoading}
           />
           <button
             type="submit"
-            disabled={!settings.workspaceId || !input.trim() || isLoading}
+            disabled={!settings.kbId || !input.trim() || isLoading}
             className="absolute right-2 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-md bg-slate-950 text-white transition-colors hover:bg-slate-800 disabled:bg-slate-200 disabled:text-slate-400"
           >
             <Send className="h-4 w-4" />
           </button>
         </div>
         <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500">
-          <span>{settings.workspaceId ? `kb_id=${settings.kbId}${settings.tenantId ? ` tenant_id=${settings.tenantId}` : ''}` : '未选择工作区'}</span>
+          <span>{settings.kbId ? `kb_id=${settings.kbId}` : '未选择知识库'}</span>
           <span>top_k={settings.topK}</span>
         </div>
       </form>

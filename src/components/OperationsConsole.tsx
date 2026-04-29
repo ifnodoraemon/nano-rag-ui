@@ -57,8 +57,8 @@ export const OperationsConsole: React.FC<OperationsConsoleProps> = ({ health, on
       </div>
 
       {tab === 'overview' && <OverviewPanel health={health} />}
-      {tab === 'retrieve' && <RetrievePanel kbId={settings.kbId} tenantId={settings.tenantId} topK={settings.topK} />}
-      {tab === 'traces' && <TracePanel kbId={settings.kbId} tenantId={settings.tenantId} />}
+      {tab === 'retrieve' && <RetrievePanel kbId={settings.kbId} topK={settings.topK} />}
+      {tab === 'traces' && <TracePanel kbId={settings.kbId} />}
       {tab === 'eval' && <EvalPanel enabled={health?.features?.eval !== false} benchmarkEnabled={health?.features?.benchmark !== false} />}
       {tab === 'diagnosis' && <DiagnosisPanel enabled={health?.features?.diagnosis !== false} />}
     </div>
@@ -109,7 +109,7 @@ const OverviewPanel = ({ health }: { health: HealthDetail | null }) => {
   );
 };
 
-const RetrievePanel = ({ kbId, tenantId, topK }: { kbId: string; tenantId: string; topK: number }) => {
+const RetrievePanel = ({ kbId, topK }: { kbId: string; topK: number }) => {
   const [query, setQuery] = useState('');
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<any>(null);
@@ -118,7 +118,7 @@ const RetrievePanel = ({ kbId, tenantId, topK }: { kbId: string; tenantId: strin
     if (!kbId) return;
     setLoading(true);
     try {
-      setResult(await retrieveDebug({ query, kb_id: kbId, tenant_id: tenantId ? tenantId : null, top_k: topK }));
+      setResult(await retrieveDebug({ query, kb_id: kbId, top_k: topK }));
     } finally {
       setLoading(false);
     }
@@ -142,7 +142,7 @@ const RetrievePanel = ({ kbId, tenantId, topK }: { kbId: string; tenantId: strin
   );
 };
 
-const TracePanel = ({ kbId, tenantId }: { kbId: string; tenantId: string }) => {
+const TracePanel = ({ kbId }: { kbId: string }) => {
   const [traces, setTraces] = useState<TraceSummary[]>([]);
   const [selected, setSelected] = useState<TraceRecord | null>(null);
   const [replay, setReplay] = useState<any>(null);
@@ -154,16 +154,16 @@ const TracePanel = ({ kbId, tenantId }: { kbId: string; tenantId: string }) => {
       setReplay(null);
       return;
     }
-    const response = await listTraces(kbId, tenantId, 1, 20);
+    const response = await listTraces(kbId, 1, 20);
     setTraces(response.items);
   };
 
   useEffect(() => {
     load();
-  }, [kbId, tenantId]);
+  }, [kbId]);
 
   const openTrace = async (traceId: string) => {
-    setSelected(await getTrace(traceId, kbId, tenantId));
+    setSelected(await getTrace(traceId, kbId));
     setReplay(null);
   };
 
@@ -278,7 +278,7 @@ const DiagnosisPanel = ({ enabled }: { enabled: boolean }) => {
   const loadOptions = async () => {
     const [traceResponse, nextReports] = await Promise.all([
       settings.kbId
-        ? listTraces(settings.kbId, settings.tenantId, 1, 50)
+        ? listTraces(settings.kbId, 1, 50)
         : Promise.resolve({ items: [], total: 0, page: 1, page_size: 50, total_pages: 0 }),
       listEvalReports(),
     ]);
@@ -288,7 +288,7 @@ const DiagnosisPanel = ({ enabled }: { enabled: boolean }) => {
 
   useEffect(() => {
     loadOptions();
-  }, [settings.kbId, settings.tenantId]);
+  }, [settings.kbId]);
 
   return (
     <section className="rounded-lg border border-slate-200 bg-white p-4">
@@ -369,7 +369,7 @@ const JsonBlock = ({ data }: { data: any }) => (
 const formatAuth = (status?: string) => {
   if (status === 'disabled') return '已关闭';
   if (status === 'configured') return '已配置';
-  if (status === 'missing_keys') return '等待账号系统';
+  if (status === 'missing_keys') return '等待 API Key 或代理配置';
   return status;
 };
 

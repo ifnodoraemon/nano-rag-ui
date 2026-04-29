@@ -8,10 +8,10 @@ export const Settings: React.FC = () => {
   const [settings, setSettings] = useRagSettings();
 
   const handleExport = async () => {
-    if (!settings.workspaceId || !settings.kbId) return;
+    if (!settings.kbId) return;
     try {
       eventBus.emit('正在导出当前知识范围', 'info');
-      const docs = await listDocuments(settings.kbId, settings.tenantId);
+      const docs = await listDocuments(settings.kbId);
       const fullData = [];
       for (const doc of docs) {
         const parsed = await getParsedDoc(doc.doc_id);
@@ -21,7 +21,7 @@ export const Settings: React.FC = () => {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `nanorag_export_${settings.workspaceId}_${new Date().toISOString().split('T')[0]}.json`;
+      a.download = `nanorag_export_${settings.kbId}_${new Date().toISOString().split('T')[0]}.json`;
       a.click();
       URL.revokeObjectURL(url);
       eventBus.emit('知识范围已导出', 'success');
@@ -40,12 +40,12 @@ export const Settings: React.FC = () => {
       <div className="flex items-start justify-between gap-3">
         <div>
           <h2 className="text-sm font-semibold text-slate-950">运行设置</h2>
-          <p className="mt-1 text-sm leading-6 text-slate-500">工作区来自后端真实数据；这里只保留检索参数和会话操作。</p>
+          <p className="mt-1 text-sm leading-6 text-slate-500">知识库来自后端真实数据；这里只保留检索参数和会话操作。</p>
         </div>
         <button
           type="button"
           onClick={handleExport}
-          disabled={!settings.workspaceId}
+          disabled={!settings.kbId}
           className="inline-flex items-center gap-2 rounded-md border border-slate-200 px-3 py-2 text-xs font-medium text-slate-600 hover:bg-slate-50 hover:text-slate-950"
         >
           <Download className="h-3.5 w-3.5" />
