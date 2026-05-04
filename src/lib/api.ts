@@ -1,7 +1,7 @@
 import { eventBus } from './event-bus';
 
 export interface ChatRequest { query: string; kb_id?: string; session_id?: string; top_k?: number; metadata_filters?: any; }
-export interface Citation { citation_label?: string; chunk_id: string; source: string; score?: number; evidence_role?: string; span_text?: string; span_start?: number; span_end?: number; modality?: string; media_uri?: string; }
+export interface Citation { citation_label?: string; chunk_id: string; source: string; score?: number; evidence_role?: string; span_text?: string; span_start?: number; span_end?: number; modality?: string; media_uri?: string; mime_type?: string; }
 export interface ChatResponse { answer: string; citations: Citation[]; contexts: any[]; trace_id: string; kb_id: string | null; session_id: string | null; }
 export interface IngestResponse { status: string; kb_id: string; documents: number; chunks: number; source: string; uploaded_files: string[]; }
 export interface FeedbackRequest { trace_id: string; rating: "up"|"down"; kb_id?: string; session_id?: string; comment?: string; tags?: string[]; }
