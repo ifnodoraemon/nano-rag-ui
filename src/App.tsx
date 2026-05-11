@@ -176,7 +176,7 @@ export default function App() {
               </div>
               <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
                 <Metric icon={Database} label="文档" value={String(docStats.documents)} />
-                <Metric icon={Activity} label="分块" value={String(docStats.chunks)} />
+                <Metric icon={Activity} label="节点" value={String(docStats.chunks)} />
                 <Metric icon={MessageSquareText} label="追踪" value={String(health?.trace_count ?? 0)} />
                 <Metric icon={ShieldCheck} label="模式" value={health?.gateway_mode} />
               </div>

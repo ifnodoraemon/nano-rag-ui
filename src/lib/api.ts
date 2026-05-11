@@ -1,11 +1,14 @@
 import { eventBus } from './event-bus';
 
 export interface ChatRequest { query: string; kb_id?: string; session_id?: string; top_k?: number; metadata_filters?: any; }
-export interface Citation { citation_label?: string; chunk_id: string; source: string; score?: number; evidence_role?: string; span_text?: string; span_start?: number; span_end?: number; modality?: string; media_uri?: string; mime_type?: string; }
+export interface Citation { citation_label?: string; chunk_id: string; node_id?: string; source: string; score?: number; page_number?: number; hierarchy_path?: string[]; bounding_box?: Record<string, any> | null; evidence_role?: string; span_text?: string; span_start?: number; span_end?: number; modality?: string; media_uri?: string; mime_type?: string; }
 export interface ChatResponse { answer: string; citations: Citation[]; contexts: any[]; trace_id: string; kb_id: string | null; session_id: string | null; }
-export interface IngestResponse { status: string; kb_id: string; documents: number; chunks: number; source: string; uploaded_files: string[]; }
+export interface IngestResponse { status: string; kb_id: string; job_id?: string | null; stage?: string | null; documents: number; chunks: number; source: string; uploaded_files: string[]; error?: string | null; }
+export interface IngestJobResponse extends IngestResponse { job_id: string; path: string; submitted_at: number; started_at?: number | null; completed_at?: number | null; }
 export interface FeedbackRequest { trace_id: string; rating: "up"|"down"; kb_id?: string; session_id?: string; comment?: string; tags?: string[]; }
 export interface DocumentSummary { doc_id: string; title: string; source_path: string; kb_id: string; chunk_count: number; updated_at: number; doc_type?: string; source_key?: string; }
+export interface DocumentNode { node_id: string; doc_id: string; kb_id: string; node_type: string; text?: string; title?: string | null; children?: DocumentNode[]; provenance?: { page_number?: number | null; hierarchy_path?: string[]; bounding_box?: Record<string, any> | null; source_ref?: string | null }; table?: any; metadata?: Record<string, any>; }
+export interface StructuredDocument { doc_id: string; kb_id: string; source_path: string; title: string; root: DocumentNode; metadata?: Record<string, any>; }
 export interface KnowledgeBaseSummary { kb_id: string; name: string; description?: string | null; source: string; external_ref?: string | null; metadata: Record<string, any>; created_at: number; updated_at: number; document_count: number; chunk_count: number; trace_count: number; last_activity_at?: number | null; }
 export interface KnowledgeBaseCreateRequest { kb_id: string; name: string; description?: string | null; source?: string; external_ref?: string | null; metadata?: Record<string, any>; }
 export interface IngestSourceSummary { path: string; name: string; extension: string; size_bytes: number; updated_at: number; }
@@ -41,6 +44,7 @@ export interface HealthDetail extends HealthSummary {
     otel_endpoint?: string | null;
   };
   vectorstore?: { status?: string; error?: string | null; details?: Record<string, any> };
+  ingestion?: { executor?: string; broker_configured?: boolean; job_store_dir?: string };
   features?: Record<string, boolean>;
   trace_count?: number;
 }
@@ -79,6 +83,7 @@ function getHeaders(isFormData = false): HeadersInit {
 const API_BASE = '';
 
 const scopedParams = (kbId: string) => new URLSearchParams({ kb_id: kbId });
+const sleep = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
 
 async function fetchWithHandlers(url: string, options?: RequestInit) {
   try {
@@ -119,8 +124,8 @@ export async function ingestUpload(files: File[], kbId: string): Promise<IngestR
     headers: getHeaders(true),
     body: fd,
   });
-  eventBus.emit(`注入完成：${result.documents} 个文档，${result.chunks} 个分块`, 'success');
-  return result;
+  eventBus.emit(`注入任务已提交：${result.job_id}`, 'info');
+  return await waitForIngestJob(result.job_id);
 }
 
 export async function chat(payload: ChatRequest): Promise<ChatResponse> {
@@ -150,8 +155,9 @@ export async function listDocuments(kbId: string): Promise<DocumentSummary[]> {
   return await fetchWithHandlers(`/v1/rag/documents?${params.toString()}`, { headers: getHeaders() });
 }
 
-export async function getParsedDoc(docId: string): Promise<{document: any, chunks: any[]}> {
-  return await fetchWithHandlers(`/debug/parsed/${docId}`, { headers: getHeaders() });
+export async function getDocumentTree(docId: string, kbId: string): Promise<StructuredDocument> {
+  const params = scopedParams(kbId);
+  return await fetchWithHandlers(`/v1/rag/documents/${docId}/tree?${params.toString()}`, { headers: getHeaders() });
 }
 
 export async function health(): Promise<HealthSummary> {
@@ -186,8 +192,28 @@ export async function ingestPath(path: string, kbId: string): Promise<IngestResp
     headers: getHeaders(),
     body: JSON.stringify({ path, kb_id: kbId }),
   });
-  eventBus.emit(`路径注入完成：${result.documents} 个文档，${result.chunks} 个分块`, 'success');
-  return result;
+  eventBus.emit(`路径注入任务已提交：${result.job_id}`, 'info');
+  return await waitForIngestJob(result.job_id);
+}
+
+export async function getIngestJob(jobId: string): Promise<IngestJobResponse> {
+  return await fetchWithHandlers(`/v1/rag/ingest/jobs/${jobId}`, { headers: getHeaders() });
+}
+
+async function waitForIngestJob(jobId?: string | null): Promise<IngestJobResponse> {
+  if (!jobId) throw new Error('后端没有返回注入任务 ID。');
+  for (let attempt = 0; attempt < 300; attempt += 1) {
+    const job = await getIngestJob(jobId);
+    if (job.status === 'completed') {
+      eventBus.emit(`注入完成：${job.documents} 个文档，${job.chunks} 个节点`, 'success');
+      return job;
+    }
+    if (job.status === 'failed') {
+      throw new Error(job.error || '注入任务失败。');
+    }
+    await sleep(1200);
+  }
+  throw new Error(`注入任务超时：${jobId}`);
 }
 
 export async function retrieveDebug(payload: ChatRequest): Promise<RetrievalDebugResponse> {

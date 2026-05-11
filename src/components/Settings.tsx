@@ -1,6 +1,6 @@
 import React from 'react';
 import { Download, RotateCcw, SlidersHorizontal } from 'lucide-react';
-import { getParsedDoc, listDocuments } from '../lib/api';
+import { getDocumentTree, listDocuments } from '../lib/api';
 import { eventBus } from '../lib/event-bus';
 import { useRagSettings } from '../lib/settings-store';
 
@@ -14,8 +14,7 @@ export const Settings: React.FC = () => {
       const docs = await listDocuments(settings.kbId);
       const fullData = [];
       for (const doc of docs) {
-        const parsed = await getParsedDoc(doc.doc_id);
-        fullData.push(parsed);
+        fullData.push(await getDocumentTree(doc.doc_id, settings.kbId));
       }
       const blob = new Blob([JSON.stringify(fullData, null, 2)], { type: 'application/json' });
       const url = URL.createObjectURL(blob);

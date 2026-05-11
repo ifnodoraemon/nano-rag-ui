@@ -51,7 +51,7 @@ export const DocumentUploader: React.FC<DocumentUploaderProps> = ({ health, onPr
       const result = await ingestUpload(files, settings.kbId);
       setFilesStatus((prev) => prev.map((item) => (
         files.some((file) => file.name === item.name)
-          ? { ...item, status: 'done', detail: `${result.documents} docs / ${result.chunks} chunks` }
+          ? { ...item, status: 'done', detail: `${result.documents} docs / ${result.chunks} nodes` }
           : item
       )));
     } catch (error) {
@@ -81,7 +81,7 @@ export const DocumentUploader: React.FC<DocumentUploaderProps> = ({ health, onPr
     try {
       const result = await ingestPath(path, settings.kbId);
       setFilesStatus((prev) => prev.map((item) => (
-        item.name === path ? { ...item, status: 'done', detail: `${result.documents} 个文档 / ${result.chunks} 个分块` } : item
+        item.name === path ? { ...item, status: 'done', detail: `${result.documents} 个文档 / ${result.chunks} 个节点` } : item
       )));
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error);
@@ -98,7 +98,7 @@ export const DocumentUploader: React.FC<DocumentUploaderProps> = ({ health, onPr
     <div className="space-y-5">
       <div>
         <h2 className="text-sm font-semibold text-slate-950">文档注入</h2>
-        <p className="mt-1 text-sm leading-6 text-slate-500">把文件写入当前知识范围，后端会生成解析产物、分块并写入向量索引。</p>
+        <p className="mt-1 text-sm leading-6 text-slate-500">把文件写入当前知识范围，后端会生成结构化文档树、节点证据并写入索引。</p>
       </div>
 
       <section className="rounded-lg border border-slate-200 bg-white p-4">

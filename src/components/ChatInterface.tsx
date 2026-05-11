@@ -258,7 +258,15 @@ const TraceResult = ({ result }: { result: Citation }) => {
             <Icon className="h-3.5 w-3.5 shrink-0 text-slate-400" />
             <span className="truncate">{result.citation_label || result.chunk_id}</span>
           </div>
+          {result.node_id && <div className="mt-1 truncate font-mono text-[11px] text-slate-500">{result.node_id}</div>}
           <div className="mt-1 truncate font-mono text-[11px] text-slate-500">{result.source}</div>
+          {(result.page_number || result.hierarchy_path?.length) && (
+            <div className="mt-1 truncate text-[11px] text-slate-500">
+              {result.page_number ? `p.${result.page_number}` : ''}
+              {result.page_number && result.hierarchy_path?.length ? ' · ' : ''}
+              {result.hierarchy_path?.join(' / ')}
+            </div>
+          )}
         </div>
         <div className="shrink-0 rounded bg-white px-2 py-1 font-mono text-[11px] text-slate-600">{(score * 100).toFixed(1)}%</div>
       </div>
