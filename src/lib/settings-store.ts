@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useCallback, useSyncExternalStore } from 'react';
 
 export interface RagSettings {
   topK: number;
@@ -16,6 +16,69 @@ const defaultSettings: RagSettings = {
   sessionId: '',
 };
 
+type SettingsUpdater = RagSettings | ((settings: RagSettings) => RagSettings);
+type SettingsListener = () => void;
+
+const listeners = new Set<SettingsListener>();
+
+function readStoredSettings(): RagSettings {
+  const saved = localStorage.getItem(STORAGE_KEY);
+  let parsed: Partial<RagSettings>;
+  try {
+    parsed = saved ? JSON.parse(saved) : {};
+  } catch {
+    parsed = {};
+  }
+  return normalizeSettings(parsed);
+}
+
+function normalizeSettings(value: Partial<RagSettings>): RagSettings {
+  return {
+    topK: typeof value.topK === 'number' && Number.isFinite(value.topK)
+      ? value.topK
+      : defaultSettings.topK,
+    kbId: typeof value.kbId === 'string' ? value.kbId : defaultSettings.kbId,
+    kbName: typeof value.kbName === 'string' ? value.kbName : defaultSettings.kbName,
+    sessionId: typeof value.sessionId === 'string' && value.sessionId
+      ? value.sessionId
+      : crypto.randomUUID(),
+  };
+}
+
+let currentSettings = readStoredSettings();
+
+function persistSettings(settings: RagSettings) {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
+}
+
+function emitSettingsChanged() {
+  listeners.forEach((listener) => listener());
+}
+
+function setGlobalSettings(updater: SettingsUpdater) {
+  const nextSettings = typeof updater === 'function'
+    ? updater(currentSettings)
+    : updater;
+  currentSettings = normalizeSettings(nextSettings);
+  persistSettings(currentSettings);
+  emitSettingsChanged();
+}
+
+function subscribe(listener: SettingsListener) {
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+  };
+}
+
+window.addEventListener('storage', (event) => {
+  if (event.key !== STORAGE_KEY) return;
+  currentSettings = readStoredSettings();
+  emitSettingsChanged();
+});
+
+persistSettings(currentSettings);
+
 export function settingsForKnowledgeBase(
   settings: RagSettings,
   knowledgeBase: { kb_id: string; name: string },
@@ -28,24 +91,14 @@ export function settingsForKnowledgeBase(
 }
 
 export function useRagSettings() {
-  const [settings, setSettings] = useState<RagSettings>(() => {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    const parsed = saved ? JSON.parse(saved) : defaultSettings;
-    if (typeof parsed.kbId !== 'string') {
-      parsed.kbId = defaultSettings.kbId;
-    }
-    if (typeof parsed.kbName !== 'string') {
-      parsed.kbName = defaultSettings.kbName;
-    }
-    if (!parsed.sessionId) {
-      parsed.sessionId = crypto.randomUUID();
-    }
-    return parsed;
-  });
-
-  useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
-  }, [settings]);
+  const settings = useSyncExternalStore(
+    subscribe,
+    () => currentSettings,
+    () => currentSettings,
+  );
+  const setSettings = useCallback((updater: SettingsUpdater) => {
+    setGlobalSettings(updater);
+  }, []);
 
   return [settings, setSettings] as const;
 }
