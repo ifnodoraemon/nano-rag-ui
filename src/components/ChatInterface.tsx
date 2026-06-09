@@ -3,9 +3,10 @@ import { Archive, Bot, ChevronDown, FileAudio, FileVideo, Image as ImageIcon, Li
 import { AnimatePresence, motion } from 'motion/react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Citation, chat, sendFeedback } from '../lib/api';
+import { Citation, chatStream, sendFeedback } from '../lib/api';
 import { cn } from '../lib/utils';
 import { useRagSettings } from '../lib/settings-store';
+import { eventBus } from '../lib/event-bus';
 
 interface RetrievalTrace {
   latency?: number;
@@ -44,32 +45,72 @@ export const ChatInterface: React.FC = () => {
     const query = input.trim();
     if (!query || isLoading || !settings.kbId) return;
 
+    const messageId = crypto.randomUUID();
     setMessages((prev) => [...prev, { id: crypto.randomUUID(), role: 'user', text: query }]);
     setInput('');
     setIsLoading(true);
     const startTime = performance.now();
 
     try {
-      const response = await chat({
+      let isFirstChunk = true;
+      let currentText = '';
+      
+      for await (const chunk of chatStream({
         query,
         kb_id: settings.kbId,
         session_id: settings.sessionId,
         top_k: settings.topK,
-      });
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: crypto.randomUUID(),
-          role: 'model',
-          text: response.answer,
-          trace: {
-            latency: Math.round(performance.now() - startTime),
-            trace_id: response.trace_id,
-            results: response.citations,
-          },
-          feedback: null,
-        },
-      ]);
+      })) {
+        if (chunk.status === 'thinking') {
+          // just wait
+        } else if (chunk.status === 'generating') {
+          if (isFirstChunk) {
+            isFirstChunk = false;
+            setMessages((prev) => [
+              ...prev,
+              {
+                id: messageId,
+                role: 'model',
+                text: chunk.chunk || '',
+              },
+            ]);
+          } else {
+            currentText += chunk.chunk || '';
+            setMessages((prev) => prev.map((m) => (m.id === messageId ? { ...m, text: currentText } : m)));
+          }
+        } else if (chunk.status === 'success') {
+          if (isFirstChunk) {
+            setMessages((prev) => [
+              ...prev,
+              {
+                id: messageId,
+                role: 'model',
+                text: chunk.answer || currentText,
+                trace: {
+                  latency: Math.round(performance.now() - startTime),
+                  trace_id: chunk.trace_id,
+                  results: chunk.citations || [],
+                },
+                feedback: null,
+              },
+            ]);
+          } else {
+            setMessages((prev) => prev.map((m) => (m.id === messageId ? { 
+              ...m, 
+              text: chunk.answer || currentText,
+              trace: {
+                latency: Math.round(performance.now() - startTime),
+                trace_id: chunk.trace_id,
+                results: chunk.citations || [],
+              },
+              feedback: null
+            } : m)));
+          }
+          eventBus.emit(`问答完成 [Trace ID: ${chunk.trace_id}]`, 'success');
+        } else if (chunk.status === 'error') {
+          throw new Error(chunk.message || 'Unknown stream error');
+        }
+      }
     } catch (error) {
       console.error(error);
       const detail = error instanceof Error ? error.message : String(error);

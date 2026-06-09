@@ -139,6 +139,49 @@ export async function chat(payload: ChatRequest): Promise<ChatResponse> {
   return result;
 }
 
+export async function* chatStream(payload: ChatRequest): AsyncGenerator<any, void, unknown> {
+  eventBus.emit(`正在发送流式问答请求`, 'info');
+  const response = await fetch(`${API_BASE}/v1/rag/chat/stream`, {
+    method: 'POST',
+    headers: getHeaders(),
+    body: JSON.stringify(payload),
+    credentials: 'include',
+  });
+  
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status} ${response.statusText}`);
+  }
+  if (!response.body) {
+    throw new Error('ReadableStream not yet supported in this browser.');
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    
+    const lines = buffer.split('\n\n');
+    buffer = lines.pop() || '';
+    
+    for (const line of lines) {
+      if (line.startsWith('data: ')) {
+        const dataStr = line.substring(6);
+        if (dataStr.trim() === '[DONE]') continue;
+        try {
+          const parsed = JSON.parse(dataStr);
+          yield parsed;
+        } catch (e) {
+          console.error('Failed to parse SSE line', dataStr);
+        }
+      }
+    }
+  }
+}
+
 export async function sendFeedback(payload: FeedbackRequest): Promise<{status: string, feedback_id: string}> {
   eventBus.emit(`正在提交反馈：${payload.trace_id}`, 'info');
   const result = await fetchWithHandlers('/v1/rag/feedback', {
