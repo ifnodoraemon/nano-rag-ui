@@ -17,8 +17,9 @@ export const DocumentUploader: React.FC<DocumentUploaderProps> = ({ health, onPr
   const [isUploading, setIsUploading] = useState(false);
   const [sources, setSources] = useState<IngestSourceSummary[]>([]);
   const [selectedSourcePath, setSelectedSourcePath] = useState('');
-  const [filesStatus, setFilesStatus] = useState<{ name: string; status: 'processing' | 'done' | 'error'; detail?: string }[]>([]);
+  const [filesStatus, setFilesStatus] = useState<{ id: string; name: string; status: 'processing' | 'done' | 'error'; detail?: string }[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const abortRef = useRef<AbortController | null>(null);
 
   const loadSources = async () => {
     const nextSources = await listIngestSources();
@@ -27,6 +28,11 @@ export const DocumentUploader: React.FC<DocumentUploaderProps> = ({ health, onPr
 
   useEffect(() => {
     loadSources();
+    // Abort any in-flight ingest poll when the tab unmounts so late state
+    // updates and network traffic stop with the component.
+    return () => {
+      abortRef.current?.abort();
+    };
   }, []);
 
   const processFiles = async (files: File[]) => {
@@ -34,37 +40,51 @@ export const DocumentUploader: React.FC<DocumentUploaderProps> = ({ health, onPr
     if (!settings.kbId) return;
     const embeddingError = ingestReadinessError(health);
     if (embeddingError) {
-      setFilesStatus((prev) => [...prev, ...files.map((file) => ({ name: file.name, status: 'error' as const, detail: embeddingError }))]);
+      setFilesStatus((prev) => [...prev, ...files.map((file) => ({ id: crypto.randomUUID(), name: file.name, status: 'error' as const, detail: embeddingError }))]);
       return;
     }
     const parser = health?.providers?.document_parser;
     const needsParser = files.some((file) => parserBackedExtensions.has(extensionOf(file.name)));
     if (needsParser && parser?.enabled && parser.configured === false) {
       const detail = '文档解析器未就绪，后端启动日志和健康检查已记录原因。';
-      setFilesStatus((prev) => [...prev, ...files.map((file) => ({ name: file.name, status: 'error' as const, detail }))]);
+      setFilesStatus((prev) => [...prev, ...files.map((file) => ({ id: crypto.randomUUID(), name: file.name, status: 'error' as const, detail }))]);
       return;
     }
-    setFilesStatus((prev) => [...prev, ...files.map((file) => ({ name: file.name, status: 'processing' as const }))]);
+    // A client-generated id is the stable row key — two same-named uploads
+    // must not cross-update each other's status rows.
+    const rowIds: string[] = files.map(() => crypto.randomUUID());
+    setFilesStatus((prev) => [
+      ...prev,
+      ...files.map((file, index) => ({ id: rowIds[index], name: file.name, status: 'processing' as const })),
+    ]);
+    const rowIdSet = new Set(rowIds);
     setIsUploading(true);
+    const controller = new AbortController();
+    abortRef.current = controller;
 
     try {
-      const result = await ingestUpload(files, settings.kbId);
+      const result = await ingestUpload(files, settings.kbId, controller.signal);
       setFilesStatus((prev) => prev.map((item) => (
-        files.some((file) => file.name === item.name)
+        rowIdSet.has(item.id)
           ? { ...item, status: 'done', detail: `${result.documents} docs / ${result.chunks} nodes` }
           : item
       )));
     } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') {
+        return; // Component unmounted — stop without touching state.
+      }
       const detail = error instanceof Error ? error.message : String(error);
       setFilesStatus((prev) => prev.map((item) => (
-        files.some((file) => file.name === item.name)
+        rowIdSet.has(item.id)
           ? { ...item, status: 'error', detail }
           : item
       )));
     } finally {
-      setIsUploading(false);
-      onProcessingComplete();
-      if (fileInputRef.current) fileInputRef.current.value = '';
+      if (!controller.signal.aborted) {
+        setIsUploading(false);
+        onProcessingComplete();
+        if (fileInputRef.current) fileInputRef.current.value = '';
+      }
     }
   };
 
@@ -73,24 +93,32 @@ export const DocumentUploader: React.FC<DocumentUploaderProps> = ({ health, onPr
     if (!path || isUploading || !settings.kbId) return;
     const embeddingError = ingestReadinessError(health);
     if (embeddingError) {
-      setFilesStatus((prev) => [...prev, { name: path, status: 'error', detail: embeddingError }]);
+      setFilesStatus((prev) => [...prev, { id: crypto.randomUUID(), name: path, status: 'error', detail: embeddingError }]);
       return;
     }
-    setFilesStatus((prev) => [...prev, { name: path, status: 'processing' }]);
+    const rowId = crypto.randomUUID();
+    setFilesStatus((prev) => [...prev, { id: rowId, name: path, status: 'processing' }]);
     setIsUploading(true);
+    const controller = new AbortController();
+    abortRef.current = controller;
     try {
-      const result = await ingestPath(path, settings.kbId);
+      const result = await ingestPath(path, settings.kbId, controller.signal);
       setFilesStatus((prev) => prev.map((item) => (
-        item.name === path ? { ...item, status: 'done', detail: `${result.documents} 个文档 / ${result.chunks} 个节点` } : item
+        item.id === rowId ? { ...item, status: 'done', detail: `${result.documents} 个文档 / ${result.chunks} 个节点` } : item
       )));
     } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') {
+        return;
+      }
       const detail = error instanceof Error ? error.message : String(error);
       setFilesStatus((prev) => prev.map((item) => (
-        item.name === path ? { ...item, status: 'error', detail } : item
+        item.id === rowId ? { ...item, status: 'error', detail } : item
       )));
     } finally {
-      setIsUploading(false);
-      onProcessingComplete();
+      if (!controller.signal.aborted) {
+        setIsUploading(false);
+        onProcessingComplete();
+      }
     }
   };
 
@@ -107,6 +135,7 @@ export const DocumentUploader: React.FC<DocumentUploaderProps> = ({ health, onPr
           <select
             value={selectedSourcePath}
             onChange={(event) => setSelectedSourcePath(event.target.value)}
+            aria-label="选择服务器文件"
             className="control font-mono"
             disabled={sources.length === 0 || !settings.kbId}
           >
@@ -141,6 +170,7 @@ export const DocumentUploader: React.FC<DocumentUploaderProps> = ({ health, onPr
           className="hidden"
           accept=".pdf,.md,.txt,.html,.png,.jpg,.jpeg,.webp,.mp3,.wav,.mp4,.mov"
           multiple
+          aria-label="选择要上传的文件"
           onChange={(event) => processFiles(Array.from(event.target.files || []))}
         />
         <div className="flex h-11 w-11 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600">
@@ -175,8 +205,8 @@ export const DocumentUploader: React.FC<DocumentUploaderProps> = ({ health, onPr
               <button type="button" onClick={() => setFilesStatus([])} className="text-xs font-medium text-slate-500 hover:text-slate-950">清空</button>
             </div>
             <div className="max-h-64 overflow-y-auto divide-y divide-slate-100">
-              {filesStatus.map((file, index) => (
-                <div key={`${file.name}-${index}`} className="flex items-start gap-3 px-3 py-3">
+              {filesStatus.map((file) => (
+                <div key={file.id} className="flex items-start gap-3 px-3 py-3">
                   <FileText className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" />
                   <div className="min-w-0 flex-1">
                     <div className="truncate text-sm font-medium text-slate-800">{file.name}</div>

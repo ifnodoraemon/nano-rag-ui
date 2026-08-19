@@ -67,9 +67,15 @@ export const OperationsConsole: React.FC<OperationsConsoleProps> = ({ health, on
 
 const OverviewPanel = ({ health }: { health: HealthDetail | null }) => {
   const [storage, setStorage] = useState<any>(null);
+  const [error, setError] = useState<string | null>(null);
 
   const loadStorage = async () => {
-    setStorage(await storageDebug());
+    setError(null);
+    try {
+      setStorage(await storageDebug());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
   };
 
   useEffect(() => {
@@ -104,6 +110,7 @@ const OverviewPanel = ({ health }: { health: HealthDetail | null }) => {
           </div>
           <button type="button" onClick={loadStorage} className="btn-secondary">刷新</button>
         </div>
+        {error && <ErrorNote message={error} />}
         <JsonBlock data={storage} />
       </section>
     </div>
@@ -114,12 +121,16 @@ const RetrievePanel = ({ kbId, topK }: { kbId: string; topK: number }) => {
   const [query, setQuery] = useState('');
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<any>(null);
+  const [error, setError] = useState<string | null>(null);
 
   const run = async () => {
     if (!kbId) return;
     setLoading(true);
+    setError(null);
     try {
       setResult(await retrieveDebug({ query, kb_id: kbId, top_k: topK }));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
     } finally {
       setLoading(false);
     }
@@ -132,11 +143,12 @@ const RetrievePanel = ({ kbId, topK }: { kbId: string; topK: number }) => {
         检索调试
       </div>
       <div className="space-y-3">
-        <input value={query} onChange={(event) => setQuery(event.target.value)} className="control" placeholder="输入检索问题" />
+        <input value={query} onChange={(event) => setQuery(event.target.value)} className="control" placeholder="输入检索问题" aria-label="输入检索问题" />
         <button type="button" onClick={run} disabled={!kbId || !query.trim() || loading} className="btn-primary">
           {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" />}
           执行检索
         </button>
+        {error && <ErrorNote message={error} />}
         <JsonBlock data={result} />
       </div>
     </section>
@@ -147,16 +159,23 @@ const TracePanel = ({ kbId }: { kbId: string }) => {
   const [traces, setTraces] = useState<TraceSummary[]>([]);
   const [selected, setSelected] = useState<TraceRecord | null>(null);
   const [replay, setReplay] = useState<any>(null);
+  const [error, setError] = useState<string | null>(null);
 
   const load = async () => {
     if (!kbId) {
       setTraces([]);
       setSelected(null);
       setReplay(null);
+      setError(null);
       return;
     }
-    const response = await listTraces(kbId, 1, 20);
-    setTraces(response.items);
+    setError(null);
+    try {
+      const response = await listTraces(kbId, 1, 20);
+      setTraces(response.items);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
   };
 
   useEffect(() => {
@@ -164,13 +183,23 @@ const TracePanel = ({ kbId }: { kbId: string }) => {
   }, [kbId]);
 
   const openTrace = async (traceId: string) => {
-    setSelected(await getTrace(traceId, kbId));
-    setReplay(null);
+    setError(null);
+    try {
+      setSelected(await getTrace(traceId, kbId));
+      setReplay(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
   };
 
   const runReplay = async () => {
     if (!selected?.trace_id) return;
-    setReplay(await replayTrace(selected.trace_id));
+    setError(null);
+    try {
+      setReplay(await replayTrace(selected.trace_id));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
   };
 
   return (
@@ -181,6 +210,10 @@ const TracePanel = ({ kbId }: { kbId: string }) => {
           <button type="button" onClick={load} disabled={!kbId} className="btn-secondary">刷新</button>
         </div>
         <div className="max-h-80 overflow-y-auto divide-y divide-slate-100">
+          {error && <div className="px-3 py-3"><ErrorNote message={error} /></div>}
+          {traces.length === 0 && !error && (
+            <div className="px-3 py-6 text-center text-sm text-slate-500">暂无追踪记录</div>
+          )}
           {traces.map((trace) => (
             <button key={trace.trace_id} type="button" onClick={() => openTrace(trace.trace_id)} className="block w-full px-3 py-3 text-left hover:bg-slate-50">
               <div className="truncate font-mono text-xs text-slate-900">{trace.trace_id}</div>
@@ -212,16 +245,22 @@ const EvalPanel = ({ benchmarkEnabled, enabled }: { enabled: boolean; benchmarkE
   const [datasetPath, setDatasetPath] = useState('');
   const [selectedReport, setSelectedReport] = useState<any>(null);
   const [runResult, setRunResult] = useState<any>(null);
+  const [error, setError] = useState<string | null>(null);
 
   const load = async () => {
-    const [nextDatasets, nextEvalReports, nextBenchmarkReports] = await Promise.all([
-      listEvalDatasets(),
-      listEvalReports(),
-      listBenchmarkReports(),
-    ]);
-    setDatasets(nextDatasets);
-    setEvalReports(nextEvalReports);
-    setBenchmarkReports(nextBenchmarkReports);
+    setError(null);
+    try {
+      const [nextDatasets, nextEvalReports, nextBenchmarkReports] = await Promise.all([
+        listEvalDatasets(),
+        listEvalReports(),
+        listBenchmarkReports(),
+      ]);
+      setDatasets(nextDatasets);
+      setEvalReports(nextEvalReports);
+      setBenchmarkReports(nextBenchmarkReports);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
   };
 
   useEffect(() => {
@@ -229,17 +268,32 @@ const EvalPanel = ({ benchmarkEnabled, enabled }: { enabled: boolean; benchmarkE
   }, []);
 
   const runSelectedEval = async () => {
-    setRunResult(await runEval(datasetPath));
-    await load();
+    setError(null);
+    try {
+      setRunResult(await runEval(datasetPath));
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
   };
 
   const runSelectedBenchmark = async () => {
-    setRunResult(await runBenchmark(datasetPath));
-    await load();
+    setError(null);
+    try {
+      setRunResult(await runBenchmark(datasetPath));
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
   };
 
   const openReport = async (path: string, type: 'eval' | 'benchmark') => {
-    setSelectedReport(type === 'eval' ? await getEvalReportDetail(path) : await getBenchmarkReportDetail(path));
+    setError(null);
+    try {
+      setSelectedReport(type === 'eval' ? await getEvalReportDetail(path) : await getBenchmarkReportDetail(path));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
   };
 
   return (
@@ -247,7 +301,7 @@ const EvalPanel = ({ benchmarkEnabled, enabled }: { enabled: boolean; benchmarkE
       <section className="rounded-lg border border-slate-200 bg-white p-4">
         <div className="mb-3 text-sm font-semibold text-slate-900">评测运行</div>
         <div className="space-y-3">
-          <select value={datasetPath} onChange={(event) => setDatasetPath(event.target.value)} className="control">
+          <select value={datasetPath} onChange={(event) => setDatasetPath(event.target.value)} className="control" aria-label="请选择评测数据集">
             <option value="">请选择评测数据集</option>
             {datasets.map((dataset) => <option key={dataset.path} value={dataset.path}>{dataset.path}</option>)}
           </select>
@@ -256,6 +310,7 @@ const EvalPanel = ({ benchmarkEnabled, enabled }: { enabled: boolean; benchmarkE
             <button type="button" onClick={runSelectedBenchmark} disabled={!benchmarkEnabled || !datasetPath} className="btn-secondary">运行基准</button>
             <button type="button" onClick={load} className="btn-secondary">刷新报告</button>
           </div>
+          {error && <ErrorNote message={error} />}
         </div>
       </section>
 
@@ -275,21 +330,36 @@ const DiagnosisPanel = ({ enabled }: { enabled: boolean }) => {
   const [result, setResult] = useState<DiagnosisResponse | null>(null);
   const [traces, setTraces] = useState<TraceSummary[]>([]);
   const [reports, setReports] = useState<any[]>([]);
+  const [error, setError] = useState<string | null>(null);
 
   const loadOptions = async () => {
-    const [traceResponse, nextReports] = await Promise.all([
-      settings.kbId
-        ? listTraces(settings.kbId, 1, 50)
-        : Promise.resolve({ items: [], total: 0, page: 1, page_size: 50, total_pages: 0 }),
-      listEvalReports(),
-    ]);
-    setTraces(traceResponse.items);
-    setReports(nextReports);
+    setError(null);
+    try {
+      const [traceResponse, nextReports] = await Promise.all([
+        settings.kbId
+          ? listTraces(settings.kbId, 1, 50)
+          : Promise.resolve({ items: [], total: 0, page: 1, page_size: 50, total_pages: 0 }),
+        listEvalReports(),
+      ]);
+      setTraces(traceResponse.items);
+      setReports(nextReports);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
   };
 
   useEffect(() => {
     loadOptions();
   }, [settings.kbId]);
+
+  const diagnose = async (action: () => Promise<DiagnosisResponse>) => {
+    setError(null);
+    try {
+      setResult(await action());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  };
 
   return (
     <section className="rounded-lg border border-slate-200 bg-white p-4">
@@ -302,7 +372,7 @@ const DiagnosisPanel = ({ enabled }: { enabled: boolean }) => {
           <input type="checkbox" checked={includeAi} onChange={(event) => setIncludeAi(event.target.checked)} className="accent-slate-950" />
           包含 AI 建议
         </label>
-        <select value={traceId} onChange={(event) => setTraceId(event.target.value)} className="control font-mono">
+        <select value={traceId} onChange={(event) => setTraceId(event.target.value)} className="control font-mono" aria-label="请选择要诊断的追踪">
           <option value="">请选择追踪</option>
           {traces.map((trace) => (
             <option key={trace.trace_id} value={trace.trace_id}>
@@ -310,9 +380,9 @@ const DiagnosisPanel = ({ enabled }: { enabled: boolean }) => {
             </option>
           ))}
         </select>
-        <button type="button" onClick={async () => setResult(await diagnoseTrace(traceId, includeAi))} disabled={!enabled || !traceId.trim()} className="btn-primary">诊断追踪</button>
+        <button type="button" onClick={() => diagnose(() => diagnoseTrace(traceId, includeAi))} disabled={!enabled || !traceId.trim()} className="btn-primary">诊断追踪</button>
         <div className="grid grid-cols-[1fr_88px] gap-2">
-          <select value={reportPath} onChange={(event) => setReportPath(event.target.value)} className="control font-mono">
+          <select value={reportPath} onChange={(event) => setReportPath(event.target.value)} className="control font-mono" aria-label="请选择要诊断的评测报告">
             <option value="">请选择评测报告</option>
             {reports.map((report) => (
               <option key={report.path} value={report.path}>
@@ -320,13 +390,14 @@ const DiagnosisPanel = ({ enabled }: { enabled: boolean }) => {
               </option>
             ))}
           </select>
-          <input type="number" min="0" value={resultIndex} onChange={(event) => setResultIndex(Number(event.target.value))} className="control font-mono" />
+          <input type="number" min="0" value={resultIndex} onChange={(event) => setResultIndex(Number(event.target.value))} className="control font-mono" aria-label="评测样本序号" />
         </div>
         <div className="flex flex-wrap gap-2">
-          <button type="button" onClick={async () => setResult(await diagnoseEval(reportPath, resultIndex, includeAi))} disabled={!enabled || !reportPath.trim()} className="btn-secondary">诊断评测样本</button>
-          <button type="button" onClick={async () => setResult(await diagnoseAuto(includeAi))} disabled={!enabled} className="btn-secondary">自动诊断</button>
+          <button type="button" onClick={() => diagnose(() => diagnoseEval(reportPath, resultIndex, includeAi))} disabled={!enabled || !reportPath.trim()} className="btn-secondary">诊断评测样本</button>
+          <button type="button" onClick={() => diagnose(() => diagnoseAuto(includeAi))} disabled={!enabled} className="btn-secondary">自动诊断</button>
           <button type="button" onClick={loadOptions} className="btn-secondary">刷新选项</button>
         </div>
+        {error && <ErrorNote message={error} />}
         <JsonBlock data={result} />
       </div>
     </section>
@@ -352,6 +423,12 @@ const TabButton = ({ active, children, onClick }: { active: boolean; children: R
   <button type="button" onClick={onClick} className={cn('rounded-md px-2 py-2 text-xs font-medium transition-colors', active ? 'bg-white text-slate-950 shadow-sm' : 'text-slate-500 hover:text-slate-950')}>
     {children}
   </button>
+);
+
+const ErrorNote = ({ message }: { message: string }) => (
+  <div role="alert" className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs leading-5 text-red-700">
+    {message}
+  </div>
 );
 
 const KeyValue = ({ label, value }: { label: string; value?: string }) => (

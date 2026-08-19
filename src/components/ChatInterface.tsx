@@ -24,21 +24,57 @@ interface Message {
 
 const CHAT_STORAGE_KEY = 'nanorag_chat_history';
 
+// Corrupted localStorage must never crash the app on load — fall back to an
+// empty history and drop malformed entries instead of JSON.parse-ing blindly.
+function loadStoredMessages(): Message[] {
+  try {
+    const saved = localStorage.getItem(CHAT_STORAGE_KEY);
+    if (!saved) return [];
+    const parsed: unknown = JSON.parse(saved);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(
+      (item): item is Message =>
+        !!item
+        && typeof item === 'object'
+        && typeof (item as Message).id === 'string'
+        && ((item as Message).role === 'user' || (item as Message).role === 'model')
+        && typeof (item as Message).text === 'string',
+    );
+  } catch {
+    return [];
+  }
+}
+
 export const ChatInterface: React.FC = () => {
   const [settings] = useRagSettings();
-  const [messages, setMessages] = useState<Message[]>(() => {
-    const saved = localStorage.getItem(CHAT_STORAGE_KEY);
-    return saved ? JSON.parse(saved) : [];
-  });
+  const [messages, setMessages] = useState<Message[]>(loadStoredMessages);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [openTraceId, setOpenTraceId] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const stickToBottomRef = useRef(true);
 
   useEffect(() => {
-    localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(messages));
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    // Persisting the full history on every streamed chunk is the only correct
+    // place to write (state is the source of truth); scrolling only happens
+    // while the user is pinned to the bottom, so reading history mid-stream
+    // is not yanked down.
+    try {
+      localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(messages));
+    } catch {
+      // Storage full/unavailable — history persistence is best-effort.
+    }
+    if (stickToBottomRef.current) {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
   }, [messages]);
+
+  const handleScroll = () => {
+    const container = messagesEndRef.current?.closest('[data-chat-scroll]');
+    if (!container) return;
+    const atBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 48;
+    stickToBottomRef.current = atBottom;
+  };
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -161,7 +197,7 @@ export const ChatInterface: React.FC = () => {
         </button>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-4 py-5 md:px-6">
+      <div className="min-h-0 flex-1 overflow-y-auto px-4 py-5 md:px-6" data-chat-scroll onScroll={handleScroll}>
         {messages.length === 0 && (
           <div className="flex h-full items-center justify-center">
             <div className="max-w-md text-center">
@@ -258,12 +294,14 @@ export const ChatInterface: React.FC = () => {
             value={input}
             onChange={(event) => setInput(event.target.value)}
             placeholder="向当前知识范围提问..."
+            aria-label="向当前知识范围提问"
             className="h-12 w-full rounded-lg border border-slate-300 bg-white pl-4 pr-14 text-sm text-slate-950 outline-none transition-colors placeholder:text-slate-400 focus:border-slate-950"
             disabled={!settings.kbId || isLoading}
           />
           <button
             type="submit"
             disabled={!settings.kbId || !input.trim() || isLoading}
+            aria-label="发送问题"
             className="absolute right-2 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-md bg-slate-950 text-white transition-colors hover:bg-slate-800 disabled:bg-slate-200 disabled:text-slate-400"
           >
             <Send className="h-4 w-4" />

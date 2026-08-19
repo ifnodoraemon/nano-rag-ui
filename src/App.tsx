@@ -9,6 +9,7 @@ import { SystemLog } from './components/SystemLog';
 import { OperationsConsole } from './components/OperationsConsole';
 import { cn } from './lib/utils';
 import { HealthDetail, KnowledgeBaseSummary, createKnowledgeBase, health as healthSummary, healthDetail, listDocuments, listKnowledgeBases } from './lib/api';
+import { eventBus } from './lib/event-bus';
 import { settingsForKnowledgeBase, useRagSettings } from './lib/settings-store';
 
 type ActiveTab = 'upload' | 'explorer' | 'operations' | 'settings';
@@ -18,7 +19,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<ActiveTab>('upload');
   const [health, setHealth] = useState<HealthDetail | null>(null);
   const [knowledgeBases, setKnowledgeBases] = useState<KnowledgeBaseSummary[]>([]);
-  const [docStats, setDocStats] = useState({ documents: 0, chunks: 0 });
+  const [docStats, setDocStats] = useState<{ documents: number; chunks: number; available: boolean }>({ documents: 0, chunks: 0, available: false });
   const [newKbId, setNewKbId] = useState('');
   const [newKbName, setNewKbName] = useState('');
   const [isCreatingKb, setIsCreatingKb] = useState(false);
@@ -38,15 +39,35 @@ export default function App() {
       if (mode === 'detail') {
         setHealth(healthResult.value as HealthDetail);
       } else {
-        setHealth((prev) => ({ ...(prev ?? {}), ...healthResult.value }));
+        // The /health summary only carries status + auth fields; deep fields
+        // (gateway/vectorstore/langfuse) stay from the last detail fetch. Merge
+        // only the summary-owned keys so a light poll can't blank the detail.
+        // `status` is always present; auth keys can be undefined when the
+        // backend has no container yet — don't overwrite the cached values.
+        const summary = healthResult.value;
+        setHealth((prev) => {
+          const next = { ...(prev ?? { status: summary.status }) };
+          next.status = summary.status;
+          if (typeof summary.auth_enabled === 'boolean') next.auth_enabled = summary.auth_enabled;
+          if (typeof summary.auth_configured === 'boolean') next.auth_configured = summary.auth_configured;
+          if (typeof summary.auth_status === 'string') next.auth_status = summary.auth_status;
+          return next;
+        });
       }
+    } else {
+      // Surface the failure instead of silently keeping the previous state.
+      const reason = healthResult.reason instanceof Error ? healthResult.reason.message : String(healthResult.reason);
+      eventBus.emit(`健康检查刷新失败：${reason}`, 'error');
     }
     if (knowledgeBasesResult.status === 'fulfilled') {
       const nextKnowledgeBases = knowledgeBasesResult.value;
       setKnowledgeBases(nextKnowledgeBases);
       const activeKb = nextKnowledgeBases.find((item) => item.kb_id === settings.kbId) || nextKnowledgeBases[0];
       if (!settings.kbId && activeKb) {
-        setSettings(settingsForKnowledgeBase(settings, activeKb));
+        // Functional update: the closure's `settings` goes stale when kbId
+        // doesn't change (the effect's only dep), which would silently roll
+        // back user edits like topK/sessionId on the next poll.
+        setSettings((prev) => settingsForKnowledgeBase(prev, activeKb));
       }
     }
     const activeKbId = knowledgeBasesResult.status === 'fulfilled'
@@ -58,14 +79,17 @@ export default function App() {
         setDocStats({
           documents: docs.length,
           chunks: docs.reduce((sum, doc) => sum + doc.chunk_count, 0),
+          available: true,
         });
       } catch {
-        setDocStats({ documents: 0, chunks: 0 });
+        // Distinguish "fetch failed" from a genuinely empty knowledge base:
+        // keep the last known values and flag them unavailable.
+        setDocStats((prev) => ({ ...prev, available: false }));
       }
     } else {
-      setDocStats({ documents: 0, chunks: 0 });
+      setDocStats({ documents: 0, chunks: 0, available: false });
     }
-  }, [setSettings, settings.kbId, settings.kbName, settings.sessionId, settings.topK]);
+  }, [setSettings, settings.kbId]);
 
   useEffect(() => {
     refreshStatus('detail');
@@ -175,8 +199,8 @@ export default function App() {
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-                <Metric icon={Database} label="文档" value={String(docStats.documents)} />
-                <Metric icon={Activity} label="节点" value={String(docStats.chunks)} />
+                <Metric icon={Database} label="文档" value={docStats.available ? String(docStats.documents) : '—'} />
+                <Metric icon={Activity} label="节点" value={docStats.available ? String(docStats.chunks) : '—'} />
                 <Metric icon={MessageSquareText} label="追踪" value={String(health?.trace_count ?? 0)} />
                 <Metric icon={ShieldCheck} label="模式" value={health?.gateway_mode} />
               </div>

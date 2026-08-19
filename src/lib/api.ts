@@ -83,7 +83,24 @@ function getHeaders(isFormData = false): HeadersInit {
 const API_BASE = '';
 
 const scopedParams = (kbId: string) => new URLSearchParams({ kb_id: kbId });
-const sleep = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
+const sleep = (ms: number, signal?: AbortSignal) =>
+  new Promise<void>((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new DOMException('Aborted', 'AbortError'));
+      return;
+    }
+    // Detach the abort listener once the sleep settles normally — otherwise a
+    // long ingest poll (up to 300 rounds) accumulates listeners on the signal.
+    const onAbort = () => {
+      window.clearTimeout(timer);
+      reject(new DOMException('Aborted', 'AbortError'));
+    };
+    const timer = window.setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
 
 async function fetchWithHandlers(url: string, options?: RequestInit) {
   try {
@@ -108,13 +125,18 @@ async function fetchWithHandlers(url: string, options?: RequestInit) {
     }
     return response.json();
   } catch (error) {
+    // An abort (e.g. the component unmounted mid-poll) is expected control
+    // flow, not a failure — surface nothing.
+    if (error instanceof DOMException && error.name === 'AbortError') {
+      throw error;
+    }
     const errObj = error instanceof Error ? error : new Error(String(error));
     eventBus.emit(`接口请求失败 [${options?.method ?? 'GET'} ${url}]: ${errObj.message}`, 'error');
     throw errObj;
   }
 }
 
-export async function ingestUpload(files: File[], kbId: string): Promise<IngestResponse> {
+export async function ingestUpload(files: File[], kbId: string, signal?: AbortSignal): Promise<IngestResponse> {
   const fd = new FormData();
   files.forEach(f => fd.append("files", f));
   fd.append("kb_id", kbId);
@@ -123,9 +145,10 @@ export async function ingestUpload(files: File[], kbId: string): Promise<IngestR
     method: 'POST',
     headers: getHeaders(true),
     body: fd,
+    signal,
   });
   eventBus.emit(`注入任务已提交：${result.job_id}`, 'info');
-  return await waitForIngestJob(result.job_id);
+  return await waitForIngestJob(result.job_id, signal);
 }
 
 export async function chat(payload: ChatRequest): Promise<ChatResponse> {
@@ -147,7 +170,7 @@ export async function* chatStream(payload: ChatRequest): AsyncGenerator<any, voi
     body: JSON.stringify(payload),
     credentials: 'include',
   });
-  
+
   if (!response.ok) {
     throw new Error(`HTTP ${response.status} ${response.statusText}`);
   }
@@ -159,25 +182,37 @@ export async function* chatStream(payload: ChatRequest): AsyncGenerator<any, voi
   const decoder = new TextDecoder();
   let buffer = '';
 
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    
-    const lines = buffer.split('\n\n');
-    buffer = lines.pop() || '';
-    
-    for (const line of lines) {
-      if (line.startsWith('data: ')) {
-        const dataStr = line.substring(6);
-        if (dataStr.trim() === '[DONE]') continue;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      // Normalize CRLF/CR so frame splitting is robust to any server newline style.
+      buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+
+      const frames = buffer.split('\n\n');
+      buffer = frames.pop() || '';
+
+      for (const frame of frames) {
+        const dataLine = frame.split('\n').find((line) => line.startsWith('data:'));
+        if (!dataLine) continue;
+        const dataStr = dataLine.slice('data:'.length).trimStart();
+        if (dataStr === '[DONE]') continue;
         try {
-          const parsed = JSON.parse(dataStr);
-          yield parsed;
+          yield JSON.parse(dataStr);
         } catch (e) {
-          console.error('Failed to parse SSE line', dataStr);
+          // Surface a parse failure to the log (the consumer still renders what
+          // it has) instead of dropping the frame silently.
+          console.error('Failed to parse SSE frame', dataStr, e);
         }
       }
+    }
+  } finally {
+    // Abort the stream (and release the lock) whether the consumer finished,
+    // broke early, or threw — otherwise the fetch body keeps downloading.
+    try {
+      await reader.cancel();
+    } catch {
+      // Already closed/canceled — nothing to do.
     }
   }
 }
@@ -228,25 +263,27 @@ export async function listIngestSources(): Promise<IngestSourceSummary[]> {
   return await fetchWithHandlers('/v1/rag/ingest/sources', { headers: getHeaders() });
 }
 
-export async function ingestPath(path: string, kbId: string): Promise<IngestResponse> {
+export async function ingestPath(path: string, kbId: string, signal?: AbortSignal): Promise<IngestResponse> {
   eventBus.emit(`正在从路径注入：${path}`, 'info');
   const result = await fetchWithHandlers('/v1/rag/ingest', {
     method: 'POST',
     headers: getHeaders(),
     body: JSON.stringify({ path, kb_id: kbId }),
+    signal,
   });
   eventBus.emit(`路径注入任务已提交：${result.job_id}`, 'info');
-  return await waitForIngestJob(result.job_id);
+  return await waitForIngestJob(result.job_id, signal);
 }
 
-export async function getIngestJob(jobId: string): Promise<IngestJobResponse> {
-  return await fetchWithHandlers(`/v1/rag/ingest/jobs/${jobId}`, { headers: getHeaders() });
+export async function getIngestJob(jobId: string, signal?: AbortSignal): Promise<IngestJobResponse> {
+  return await fetchWithHandlers(`/v1/rag/ingest/jobs/${jobId}`, { headers: getHeaders(), signal });
 }
 
-async function waitForIngestJob(jobId?: string | null): Promise<IngestJobResponse> {
+async function waitForIngestJob(jobId?: string | null, signal?: AbortSignal): Promise<IngestJobResponse> {
   if (!jobId) throw new Error('后端没有返回注入任务 ID。');
   for (let attempt = 0; attempt < 300; attempt += 1) {
-    const job = await getIngestJob(jobId);
+    if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+    const job = await getIngestJob(jobId, signal);
     if (job.status === 'completed') {
       eventBus.emit(`注入完成：${job.documents} 个文档，${job.chunks} 个节点`, 'success');
       return job;
@@ -254,7 +291,7 @@ async function waitForIngestJob(jobId?: string | null): Promise<IngestJobRespons
     if (job.status === 'failed') {
       throw new Error(job.error || '注入任务失败。');
     }
-    await sleep(1200);
+    await sleep(1200, signal);
   }
   throw new Error(`注入任务超时：${jobId}`);
 }

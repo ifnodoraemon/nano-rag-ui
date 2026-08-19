@@ -60,13 +60,17 @@ export const KnowledgeExplorer: React.FC = () => {
     });
   }, [sources, searchTerm]);
 
-  const filteredNodes = useMemo(() => {
+  const nodeFilter = useMemo(() => {
     const term = searchTerm.toLowerCase();
-    return nodes.filter((node) => {
+    const matches = nodes.filter((node) => {
       const text = `${node.title || ''} ${node.text || ''} ${node.node_id}`.toLowerCase();
       return text.includes(term);
-    }).slice(0, 120);
+    });
+    // Cap the rendered list, but keep the full count so the UI can show
+    // "showing N of M" instead of silently truncating.
+    return { shown: matches.slice(0, 120), total: matches.length };
   }, [nodes, searchTerm]);
+  const filteredNodes = nodeFilter.shown;
 
   return (
     <div className="space-y-5">
@@ -98,10 +102,11 @@ export const KnowledgeExplorer: React.FC = () => {
           value={searchTerm}
           onChange={(event) => setSearchTerm(event.target.value)}
           placeholder={viewMode === 'sources' ? '搜索文档...' : '搜索节点...'}
+          aria-label={viewMode === 'sources' ? '搜索文档' : '搜索节点'}
           className="h-10 w-full rounded-lg border border-slate-300 bg-white pl-9 pr-9 text-sm outline-none transition-colors placeholder:text-slate-400 focus:border-slate-950"
         />
         {searchTerm && (
-          <button type="button" onClick={() => setSearchTerm('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-900">
+          <button type="button" onClick={() => setSearchTerm('')} aria-label="清空搜索" className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-900">
             <X className="h-4 w-4" />
           </button>
         )}
@@ -167,6 +172,12 @@ export const KnowledgeExplorer: React.FC = () => {
               </motion.div>
             ))}
           </AnimatePresence>
+        )}
+
+        {!isLoading && viewMode === 'nodes' && nodeFilter.total > filteredNodes.length && (
+          <p className="py-1 text-center text-xs text-slate-500">
+            显示 {filteredNodes.length} / {nodeFilter.total} 个匹配节点
+          </p>
         )}
 
         {!isLoading && viewMode === 'sources' && filteredSources.length === 0 && (
