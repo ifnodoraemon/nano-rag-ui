@@ -40,7 +40,7 @@ export default function App() {
         setHealth(healthResult.value as HealthDetail);
       } else {
         // The /health summary only carries status + auth fields; deep fields
-        // (gateway/vectorstore/langfuse) stay from the last detail fetch. Merge
+        // (gateway/discovery/langfuse) stay from the last detail fetch. Merge
         // only the summary-owned keys so a light poll can't blank the detail.
         // `status` is always present; auth keys can be undefined when the
         // backend has no container yet — don't overwrite the cached values.
@@ -63,10 +63,14 @@ export default function App() {
       const nextKnowledgeBases = knowledgeBasesResult.value;
       setKnowledgeBases(nextKnowledgeBases);
       const activeKb = nextKnowledgeBases.find((item) => item.kb_id === settings.kbId) || nextKnowledgeBases[0];
-      if (!settings.kbId && activeKb) {
-        // Functional update: the closure's `settings` goes stale when kbId
-        // doesn't change (the effect's only dep), which would silently roll
-        // back user edits like topK/sessionId on the next poll.
+      if (activeKb && activeKb.kb_id !== settings.kbId) {
+        // Re-anchor when the stored kbId is empty OR no longer exists
+        // (a KB deleted server-side, or a container reset while the
+        // browser's localStorage still points at a stale id — every call
+        // would otherwise 404 "knowledge base not found"). Functional
+        // update: the closure's `settings` goes stale when kbId doesn't
+        // change (the effect's only dep), which would silently roll back
+        // user edits like topK/sessionId on the next poll.
         setSettings((prev) => settingsForKnowledgeBase(prev, activeKb));
       }
     }
@@ -148,7 +152,7 @@ export default function App() {
           <div className="mt-auto border-t border-slate-200 p-4">
             <div className="space-y-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
               <StatusRow label="模型模式" value={health?.gateway_mode} tone={health?.gateway_mode === 'live' ? 'good' : 'muted'} />
-              <StatusRow label="向量库" value={health?.vectorstore_backend} tone={health?.vectorstore?.status === 'ok' ? 'good' : 'muted'} />
+              <StatusRow label="检索层" value={health?.discovery?.details?.backend ?? 'wiki-bm25'} tone={health?.discovery?.status === 'ok' ? 'good' : 'muted'} />
               <StatusRow label="鉴权" value={formatAuthStatus(health?.auth_status)} tone={health?.auth_enabled ? 'good' : 'muted'} />
             </div>
             <a

@@ -92,7 +92,7 @@ const OverviewPanel = ({ health }: { health: HealthDetail | null }) => {
         <div className="grid grid-cols-2 gap-3 text-sm">
           <KeyValue label="服务" value={health?.service} />
           <KeyValue label="模型模式" value={health?.gateway_mode} />
-          <KeyValue label="向量库" value={health?.vectorstore_backend} />
+          <KeyValue label="检索层" value={health?.discovery?.details?.backend ?? 'wiki-bm25'} />
           <KeyValue label="注入执行器" value={health?.ingestion?.executor} />
           <KeyValue label="追踪数量" value={String(health?.trace_count ?? 0)} />
           <KeyValue label="Langfuse UI" value={formatReachable(health?.langfuse?.ui_reachable)} />

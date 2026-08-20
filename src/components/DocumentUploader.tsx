@@ -38,9 +38,9 @@ export const DocumentUploader: React.FC<DocumentUploaderProps> = ({ health, onPr
   const processFiles = async (files: File[]) => {
     if (!files.length) return;
     if (!settings.kbId) return;
-    const embeddingError = ingestReadinessError(health);
-    if (embeddingError) {
-      setFilesStatus((prev) => [...prev, ...files.map((file) => ({ id: crypto.randomUUID(), name: file.name, status: 'error' as const, detail: embeddingError }))]);
+    const readinessError = ingestReadinessError(health);
+    if (readinessError) {
+      setFilesStatus((prev) => [...prev, ...files.map((file) => ({ id: crypto.randomUUID(), name: file.name, status: 'error' as const, detail: readinessError }))]);
       return;
     }
     const parser = health?.providers?.document_parser;
@@ -91,9 +91,9 @@ export const DocumentUploader: React.FC<DocumentUploaderProps> = ({ health, onPr
   const processPath = async () => {
     const path = selectedSourcePath;
     if (!path || isUploading || !settings.kbId) return;
-    const embeddingError = ingestReadinessError(health);
-    if (embeddingError) {
-      setFilesStatus((prev) => [...prev, { id: crypto.randomUUID(), name: path, status: 'error', detail: embeddingError }]);
+    const readinessError = ingestReadinessError(health);
+    if (readinessError) {
+      setFilesStatus((prev) => [...prev, { id: crypto.randomUUID(), name: path, status: 'error', detail: readinessError }]);
       return;
     }
     const rowId = crypto.randomUUID();
@@ -239,9 +239,9 @@ const extensionOf = (name: string) => {
 
 const ingestReadinessError = (health: HealthDetail | null) => {
   if (!health) return '系统健康状态未加载。';
-  const embedding = health.gateway?.capabilities?.embedding;
-  if (!embedding?.reachable) {
-    return '后端健康检查显示 embedding provider 不可用。';
+  const generation = health.gateway?.capabilities?.generation;
+  if (!generation?.reachable) {
+    return '后端健康检查显示 generation provider 不可用。';
   }
   return null;
 };

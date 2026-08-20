@@ -16,7 +16,6 @@ export interface HealthSummary { status: string; auth_enabled?: boolean; auth_co
 export interface HealthDetail extends HealthSummary {
   service?: string;
   gateway_mode?: string;
-  vectorstore_backend?: string;
   parsed_dir?: string;
   gateway?: {
     base_url?: string;
@@ -43,7 +42,7 @@ export interface HealthDetail extends HealthSummary {
     ui_endpoint?: string | null;
     otel_endpoint?: string | null;
   };
-  vectorstore?: { status?: string; error?: string | null; details?: Record<string, any> };
+  discovery?: { status?: string; error?: string | null; details?: Record<string, any> };
   ingestion?: { executor?: string; broker_configured?: boolean; job_store_dir?: string };
   features?: Record<string, boolean>;
   trace_count?: number;
