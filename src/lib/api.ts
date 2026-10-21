@@ -64,11 +64,10 @@ export interface TraceRecord extends TraceSummary {
   contexts?: any[];
   citations?: any[];
   retrieved?: any[];
-  reranked?: any[];
   prompt_messages?: any[];
   step_latencies?: Record<string, number>;
 }
-export interface RetrievalDebugResponse { query: string; retrieved: any[]; reranked: any[]; contexts: any[]; trace_id?: string | null; }
+export interface RetrievalDebugResponse { query: string; retrieved: any[]; contexts: any[]; trace_id?: string | null; }
 export interface DiagnosisResponse { target_type: string; trace_id?: string | null; sample_id?: string | null; summary: string; findings: any[]; ai_suggestion?: string | null; }
 export interface RunReportResponse { status: string; output_path?: string | null; report: any; }
 
