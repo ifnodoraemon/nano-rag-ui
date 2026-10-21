@@ -12,8 +12,10 @@ export const KnowledgeExplorer: React.FC = () => {
   const [selectedDoc, setSelectedDoc] = useState<DocumentSummary | null>(null);
   const [nodes, setNodes] = useState<DocumentNode[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const loadSources = async () => {
+    setLoadError(null);
     if (!settings.kbId) {
       setSources([]);
       setSelectedDoc(null);
@@ -26,8 +28,10 @@ export const KnowledgeExplorer: React.FC = () => {
       const docs = await listDocuments(settings.kbId);
       setSources(docs);
     } catch (error) {
-      console.error(error);
+      // A 401/500 must not render as "暂无文档": that reads like an empty
+      // knowledge base instead of a failed request.
       setSources([]);
+      setLoadError(error instanceof Error ? error.message : String(error));
     } finally {
       setIsLoading(false);
     }
@@ -181,7 +185,9 @@ export const KnowledgeExplorer: React.FC = () => {
         )}
 
         {!isLoading && viewMode === 'sources' && filteredSources.length === 0 && (
-          <EmptyState icon={Database} title={settings.kbId ? '暂无文档' : '未选择知识库'} detail={settings.kbId ? '后端当前知识库没有返回文档。' : '请选择或创建知识库后查看文档。'} />
+          loadError
+            ? <EmptyState icon={Database} title="文档加载失败" detail={loadError} />
+            : <EmptyState icon={Database} title={settings.kbId ? '暂无文档' : '未选择知识库'} detail={settings.kbId ? '后端当前知识库没有返回文档。' : '请选择或创建知识库后查看文档。'} />
         )}
         {!isLoading && viewMode === 'nodes' && filteredNodes.length === 0 && (
           <EmptyState icon={FileText} title="暂无节点" detail="后端结构化文档树为空，或没有匹配当前搜索词。" />

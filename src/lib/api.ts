@@ -1,4 +1,5 @@
 import { eventBus } from './event-bus';
+import { getAdminKey } from './settings-store';
 
 export interface ChatRequest { query: string; kb_id?: string; session_id?: string; top_k?: number; metadata_filters?: any; }
 export interface Citation { citation_label?: string; chunk_id: string; node_id?: string; source: string; score?: number; page_number?: number; hierarchy_path?: string[]; bounding_box?: Record<string, any> | null; evidence_role?: string; span_text?: string; span_start?: number; span_end?: number; modality?: string; media_uri?: string; mime_type?: string; }
@@ -75,6 +76,12 @@ function getHeaders(isFormData = false): HeadersInit {
   const headers: Record<string, string> = {};
   if (!isFormData) {
     headers['Content-Type'] = 'application/json';
+  }
+  // Operator credential, when the operator has entered one. Business routes
+  // ignore it (nginx injects the business key); admin routes require it.
+  const adminKey = getAdminKey();
+  if (adminKey) {
+    headers['X-Admin-API-Key'] = adminKey;
   }
   return headers;
 }

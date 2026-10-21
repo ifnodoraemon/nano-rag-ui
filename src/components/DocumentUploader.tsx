@@ -21,13 +21,25 @@ export const DocumentUploader: React.FC<DocumentUploaderProps> = ({ health, onPr
   const fileInputRef = useRef<HTMLInputElement>(null);
   const abortRef = useRef<AbortController | null>(null);
 
+  const [sourcesError, setSourcesError] = useState<string | null>(null);
+
   const loadSources = async () => {
-    const nextSources = await listIngestSources();
-    setSources(nextSources);
+    try {
+      const nextSources = await listIngestSources();
+      setSources(nextSources);
+      setSourcesError(null);
+    } catch (error) {
+      // /v1/rag/ingest/sources is an operator route: without an admin key the
+      // backend answers 401. Say so instead of rendering an empty list that
+      // reads like "there is nothing to inject".
+      const reason = error instanceof Error ? error.message : String(error);
+      setSources([]);
+      setSourcesError(reason);
+    }
   };
 
   useEffect(() => {
-    loadSources();
+    void loadSources();
     // Abort any in-flight ingest poll when the tab unmounts so late state
     // updates and network traffic stop with the component.
     return () => {
@@ -151,7 +163,9 @@ export const DocumentUploader: React.FC<DocumentUploaderProps> = ({ health, onPr
           </button>
         </div>
         {sources.length === 0 && (
-          <p className="mt-2 text-xs text-slate-500">后端当前没有返回可注入文件。</p>
+          sourcesError
+            ? <p className="mt-2 text-xs text-rose-600">可注入文件加载失败：{sourcesError}（运维接口需要运维密钥）</p>
+            : <p className="mt-2 text-xs text-slate-500">后端当前没有返回可注入文件。</p>
         )}
       </section>
 
@@ -238,9 +252,12 @@ const extensionOf = (name: string) => {
 };
 
 const ingestReadinessError = (health: HealthDetail | null) => {
-  if (!health) return '系统健康状态未加载。';
+  // /health/detail is operator-gated. When it is unavailable we do NOT know the
+  // provider state — claiming "not loaded" (or inventing an error) would block
+  // ingest on a guess. Let the request run and surface the real backend error.
+  if (!health) return null;
   const generation = health.gateway?.capabilities?.generation;
-  if (!generation?.reachable) {
+  if (generation && generation.reachable === false) {
     return '后端健康检查显示 generation provider 不可用。';
   }
   return null;

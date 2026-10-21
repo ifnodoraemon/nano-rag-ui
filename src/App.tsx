@@ -23,6 +23,9 @@ export default function App() {
   const [newKbId, setNewKbId] = useState('');
   const [newKbName, setNewKbName] = useState('');
   const [isCreatingKb, setIsCreatingKb] = useState(false);
+  // /health/detail is operator-gated: when it fails we surface that instead of
+  // rendering empty panels that look like real (zero) measurements.
+  const [operatorDataUnavailable, setOperatorDataUnavailable] = useState(false);
 
   const activeKnowledgeBase = useMemo(() => {
     return knowledgeBases.find((item) => item.kb_id === settings.kbId);
@@ -57,8 +60,10 @@ export default function App() {
     } else {
       // Surface the failure instead of silently keeping the previous state.
       const reason = healthResult.reason instanceof Error ? healthResult.reason.message : String(healthResult.reason);
+      if (mode === 'detail') setOperatorDataUnavailable(true);
       eventBus.emit(`健康检查刷新失败：${reason}`, 'error');
     }
+    if (healthResult.status === 'fulfilled' && mode === 'detail') setOperatorDataUnavailable(false);
     if (knowledgeBasesResult.status === 'fulfilled') {
       const nextKnowledgeBases = knowledgeBasesResult.value;
       setKnowledgeBases(nextKnowledgeBases);
@@ -152,7 +157,7 @@ export default function App() {
           <div className="mt-auto border-t border-slate-200 p-4">
             <div className="space-y-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
               <StatusRow label="模型模式" value={health?.gateway_mode} tone={health?.gateway_mode === 'live' ? 'good' : 'muted'} />
-              <StatusRow label="检索层" value={health?.discovery?.details?.backend ?? 'wiki-bm25'} tone={health?.discovery?.status === 'ok' ? 'good' : 'muted'} />
+              <StatusRow label="检索层" value={typeof health?.discovery?.details?.backend === 'string' ? health.discovery.details.backend : '未知'} tone={health?.discovery?.status === 'ok' ? 'good' : 'muted'} />
               <StatusRow label="鉴权" value={formatAuthStatus(health?.auth_status)} tone={health?.auth_enabled ? 'good' : 'muted'} />
             </div>
             <a
@@ -176,6 +181,11 @@ export default function App() {
                   <span className="rounded-md bg-slate-100 px-2 py-0.5 font-mono text-slate-700">{scopeLabel || '未选择'}</span>
                   {health?.auth_enabled === false && (
                     <span className="rounded-md bg-amber-50 px-2 py-0.5 text-amber-700">本地鉴权关闭</span>
+                  )}
+                  {operatorDataUnavailable && (
+                    <span className="rounded-md bg-amber-50 px-2 py-0.5 text-amber-700">
+                      运维数据不可用：请在“设置”中填写运维密钥
+                    </span>
                   )}
                 </div>
                 <h2 className="mt-1 text-xl font-semibold tracking-tight text-slate-950">RAG 运营台</h2>
@@ -205,7 +215,7 @@ export default function App() {
               <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
                 <Metric icon={Database} label="文档" value={docStats.available ? String(docStats.documents) : '—'} />
                 <Metric icon={Activity} label="节点" value={docStats.available ? String(docStats.chunks) : '—'} />
-                <Metric icon={MessageSquareText} label="追踪" value={String(health?.trace_count ?? 0)} />
+                <Metric icon={MessageSquareText} label="追踪" value={typeof health?.trace_count === 'number' ? String(health.trace_count) : '—'} />
                 <Metric icon={ShieldCheck} label="模式" value={health?.gateway_mode} />
               </div>
             </div>

@@ -1,5 +1,5 @@
 import React from 'react';
-import { Download, RotateCcw, SlidersHorizontal } from 'lucide-react';
+import { Download, KeyRound, RotateCcw, SlidersHorizontal } from 'lucide-react';
 import { getDocumentTree, listDocuments } from '../lib/api';
 import { eventBus } from '../lib/event-bus';
 import { useRagSettings } from '../lib/settings-store';
@@ -66,6 +66,26 @@ export const Settings: React.FC = () => {
             value={settings.topK}
             onChange={(event) => setSettings({ ...settings, topK: Number(event.target.value) })}
             className="w-full accent-slate-950"
+          />
+        </Field>
+      </section>
+
+      <section className="rounded-lg border border-slate-200 bg-white p-4">
+        <div className="mb-4 flex items-center gap-2 text-sm font-semibold text-slate-900">
+          <KeyRound className="h-4 w-4 text-slate-500" />
+          运维密钥
+        </div>
+        <Field
+          label="admin API key"
+          hint="注入、追踪、评测、回放与 /health/detail 需要运维密钥（X-Admin-API-Key）。浏览器不保存业务密钥——那由 nginx 注入；只有运维接口需要你自己提供。"
+        >
+          <input
+            type="password"
+            value={settings.adminKey}
+            onChange={(event) => setSettings({ ...settings, adminKey: event.target.value.trim() })}
+            placeholder="RAG_ADMIN_API_KEYS 中的任意一个值"
+            autoComplete="off"
+            className="h-10 w-full rounded-md border border-slate-300 bg-white px-3 font-mono text-xs text-slate-950 outline-none transition-colors focus:border-slate-950"
           />
         </Field>
       </section>

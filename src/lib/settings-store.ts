@@ -5,6 +5,13 @@ export interface RagSettings {
   kbId: string;
   kbName: string;
   sessionId: string;
+  /**
+   * Operator credential for admin routes (ingest, traces, eval, replay,
+   * /health/detail). The browser never holds the *business* key — nginx
+   * injects that — but operator routes require the caller to present the
+   * admin key themselves.
+   */
+  adminKey: string;
 }
 
 const STORAGE_KEY = 'nanorag_settings';
@@ -14,6 +21,7 @@ const defaultSettings: RagSettings = {
   kbId: '',
   kbName: '',
   sessionId: '',
+  adminKey: '',
 };
 
 type SettingsUpdater = RagSettings | ((settings: RagSettings) => RagSettings);
@@ -42,6 +50,7 @@ function normalizeSettings(value: Partial<RagSettings>): RagSettings {
     sessionId: typeof value.sessionId === 'string' && value.sessionId
       ? value.sessionId
       : crypto.randomUUID(),
+    adminKey: typeof value.adminKey === 'string' ? value.adminKey : defaultSettings.adminKey,
   };
 }
 
@@ -78,6 +87,10 @@ window.addEventListener('storage', (event) => {
 });
 
 persistSettings(currentSettings);
+
+export function getAdminKey(): string {
+  return currentSettings.adminKey;
+}
 
 export function settingsForKnowledgeBase(
   settings: RagSettings,

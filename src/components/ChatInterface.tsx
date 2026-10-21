@@ -176,7 +176,10 @@ export const ChatInterface: React.FC = () => {
         session_id: settings.sessionId,
       });
     } catch (error) {
-      console.error(error);
+      // Roll the optimistic rating back: leaving a thumbs-up that never
+      // reached the backend would fake feedback data.
+      setMessages((prev) => prev.map((item) => (item.id === message.id ? { ...item, feedback: message.feedback } : item)));
+      eventBus.emit(`反馈提交失败：${error instanceof Error ? error.message : String(error)}`, 'error');
     }
   };
 
