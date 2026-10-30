@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Activity, Database, FileUp, Github, Library, MessageSquareText, Settings as SettingsIcon, ShieldCheck, SlidersHorizontal } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { DocumentUploader } from './components/DocumentUploader';
@@ -9,7 +9,6 @@ import { SystemLog } from './components/SystemLog';
 import { OperationsConsole } from './components/OperationsConsole';
 import { cn } from './lib/utils';
 import { HealthDetail, KnowledgeBaseSummary, createKnowledgeBase, health as healthSummary, healthDetail, listDocuments, listKnowledgeBases } from './lib/api';
-import { eventBus } from './lib/event-bus';
 import { settingsForKnowledgeBase, useRagSettings } from './lib/settings-store';
 
 type ActiveTab = 'upload' | 'explorer' | 'operations' | 'settings';
@@ -26,6 +25,10 @@ export default function App() {
   // /health/detail is operator-gated: when it fails we surface that instead of
   // rendering empty panels that look like real (zero) measurements.
   const [operatorDataUnavailable, setOperatorDataUnavailable] = useState(false);
+  const [operatorError, setOperatorError] = useState<string | null>(null);
+  const statusRequest = useRef(0);
+  const canRequestOperatorData = Boolean(settings.adminKey.trim()) || health?.auth_enabled === false;
+  const operatorConnected = canRequestOperatorData && !operatorDataUnavailable && health?.gateway !== undefined;
 
   const activeKnowledgeBase = useMemo(() => {
     return knowledgeBases.find((item) => item.kb_id === settings.kbId);
@@ -34,13 +37,24 @@ export default function App() {
   const scopeLabel = activeKnowledgeBase?.name || settings.kbName || settings.kbId;
 
   const refreshStatus = useCallback(async (mode: 'summary' | 'detail' = 'detail', forceDetailRefresh = false) => {
+    const requestId = ++statusRequest.current;
+    const requestDetail = mode === 'detail' && canRequestOperatorData;
+    if (!canRequestOperatorData) {
+      setOperatorDataUnavailable(true);
+      setOperatorError(null);
+    }
     const [healthResult, knowledgeBasesResult] = await Promise.allSettled([
-      mode === 'detail' ? healthDetail(forceDetailRefresh) : healthSummary(),
+      requestDetail ? healthDetail(forceDetailRefresh) : healthSummary(),
       listKnowledgeBases(),
     ]);
+    if (requestId !== statusRequest.current) return;
     if (healthResult.status === 'fulfilled') {
-      if (mode === 'detail') {
+      if (requestDetail) {
         setHealth(healthResult.value as HealthDetail);
+        setOperatorDataUnavailable(false);
+        setOperatorError(null);
+      } else if (!canRequestOperatorData) {
+        setHealth(healthResult.value);
       } else {
         // The /health summary only carries status + auth fields; deep fields
         // (gateway/discovery/langfuse) stay from the last detail fetch. Merge
@@ -60,10 +74,12 @@ export default function App() {
     } else {
       // Surface the failure instead of silently keeping the previous state.
       const reason = healthResult.reason instanceof Error ? healthResult.reason.message : String(healthResult.reason);
-      if (mode === 'detail') setOperatorDataUnavailable(true);
-      eventBus.emit(`健康检查刷新失败：${reason}`, 'error');
+      if (requestDetail) {
+        setOperatorDataUnavailable(true);
+        setOperatorError(reason);
+      }
+      // The API client records the failure once, including the failing route.
     }
-    if (healthResult.status === 'fulfilled' && mode === 'detail') setOperatorDataUnavailable(false);
     if (knowledgeBasesResult.status === 'fulfilled') {
       const nextKnowledgeBases = knowledgeBasesResult.value;
       setKnowledgeBases(nextKnowledgeBases);
@@ -85,6 +101,7 @@ export default function App() {
     if (activeKbId) {
       try {
         const docs = await listDocuments(activeKbId);
+        if (requestId !== statusRequest.current) return;
         setDocStats({
           documents: docs.length,
           chunks: docs.reduce((sum, doc) => sum + doc.chunk_count, 0),
@@ -98,12 +115,15 @@ export default function App() {
     } else {
       setDocStats({ documents: 0, chunks: 0, available: false });
     }
-  }, [setSettings, settings.kbId]);
+  }, [setSettings, settings.kbId, settings.adminKey, canRequestOperatorData]);
 
   useEffect(() => {
     refreshStatus('detail');
     const intervalId = window.setInterval(() => refreshStatus('summary'), 30000);
-    return () => window.clearInterval(intervalId);
+    return () => {
+      window.clearInterval(intervalId);
+      statusRequest.current += 1;
+    };
   }, [refreshStatus]);
 
   const createKb = async () => {
@@ -183,9 +203,9 @@ export default function App() {
                     <span className="rounded-md bg-amber-50 px-2 py-0.5 text-amber-700">本地鉴权关闭</span>
                   )}
                   {operatorDataUnavailable && (
-                    <span className="rounded-md bg-amber-50 px-2 py-0.5 text-amber-700">
-                      运维数据不可用：请在“设置”中填写运维密钥
-                    </span>
+                    <button type="button" onClick={() => setActiveTab('settings')} className="rounded-md bg-amber-50 px-2 py-0.5 text-amber-700 hover:bg-amber-100">
+                      {operatorError ? '重新连接运维' : '连接运维接口'}
+                    </button>
                   )}
                 </div>
                 <h2 className="mt-1 text-xl font-semibold tracking-tight text-slate-950">RAG 运营台</h2>
@@ -238,9 +258,18 @@ export default function App() {
                     exit={{ opacity: 0, y: -8 }}
                     transition={{ duration: 0.16 }}
                   >
-                    {activeTab === 'upload' && <DocumentUploader health={health} onProcessingComplete={() => refreshStatus('detail', true)} />}
+                    {(activeTab === 'upload' || activeTab === 'operations') && !operatorConnected && (
+                      <section className="rounded-lg border border-amber-200 bg-amber-50 p-4">
+                        <h2 className="text-sm font-semibold text-amber-950">连接运维接口</h2>
+                        <p className="mt-2 text-sm leading-6 text-amber-900">
+                          {operatorError || '文档注入和运维评测需要运维密钥。验证连接后，会自动加载服务详情和可注入文件。'}
+                        </p>
+                        <button type="button" onClick={() => setActiveTab('settings')} className="btn-primary mt-3">前往设置连接</button>
+                      </section>
+                    )}
+                    {activeTab === 'upload' && operatorConnected && <DocumentUploader health={health} onProcessingComplete={() => refreshStatus('detail', true)} />}
                     {activeTab === 'explorer' && <KnowledgeExplorer />}
-                    {activeTab === 'operations' && <OperationsConsole health={health} onRefresh={() => refreshStatus('detail', true)} />}
+                    {activeTab === 'operations' && operatorConnected && <OperationsConsole health={health} onRefresh={() => refreshStatus('detail', true)} />}
                     {activeTab === 'settings' && <Settings />}
                   </motion.div>
                 </AnimatePresence>

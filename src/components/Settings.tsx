@@ -1,11 +1,45 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Download, KeyRound, RotateCcw, SlidersHorizontal } from 'lucide-react';
-import { getDocumentTree, listDocuments } from '../lib/api';
+import { getDocumentTree, healthDetail, listDocuments } from '../lib/api';
 import { eventBus } from '../lib/event-bus';
 import { useRagSettings } from '../lib/settings-store';
 
 export const Settings: React.FC = () => {
   const [settings, setSettings] = useRagSettings();
+  const [adminKeyDraft, setAdminKeyDraft] = useState(settings.adminKey);
+  const [isConnecting, setIsConnecting] = useState(false);
+  const [connectionMessage, setConnectionMessage] = useState<string | null>(null);
+  const [connectionError, setConnectionError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setAdminKeyDraft(settings.adminKey);
+  }, [settings.adminKey]);
+
+  const connectOperator = async (event: React.FormEvent) => {
+    event.preventDefault();
+    const candidate = adminKeyDraft.trim();
+    if (!candidate || isConnecting) return;
+    setIsConnecting(true);
+    setConnectionMessage(null);
+    setConnectionError(null);
+    try {
+      await healthDetail(false, candidate);
+      setSettings((previous) => ({ ...previous, adminKey: candidate }));
+      setConnectionMessage('连接成功，运维数据将自动刷新。');
+      eventBus.emit('运维连接已验证并保存', 'success');
+    } catch (error) {
+      setConnectionError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setIsConnecting(false);
+    }
+  };
+
+  const disconnectOperator = () => {
+    setSettings((previous) => ({ ...previous, adminKey: '' }));
+    setAdminKeyDraft('');
+    setConnectionMessage('已断开运维连接。');
+    setConnectionError(null);
+  };
 
   const handleExport = async () => {
     if (!settings.kbId) return;
@@ -75,19 +109,36 @@ export const Settings: React.FC = () => {
           <KeyRound className="h-4 w-4 text-slate-500" />
           运维密钥
         </div>
-        <Field
-          label="admin API key"
-          hint="注入、追踪、评测、回放与 /health/detail 需要运维密钥（X-Admin-API-Key）。浏览器不保存业务密钥——那由 nginx 注入；只有运维接口需要你自己提供。"
-        >
-          <input
-            type="password"
-            value={settings.adminKey}
-            onChange={(event) => setSettings({ ...settings, adminKey: event.target.value.trim() })}
-            placeholder="RAG_ADMIN_API_KEYS 中的任意一个值"
-            autoComplete="off"
-            className="h-10 w-full rounded-md border border-slate-300 bg-white px-3 font-mono text-xs text-slate-950 outline-none transition-colors focus:border-slate-950"
-          />
-        </Field>
+        <form onSubmit={connectOperator} className="space-y-3">
+          <Field
+            label="运维密钥"
+            hint="用于文档注入、追踪和评测。填写服务端 docker/.env 中 RAG_ADMIN_API_KEYS 的一个值，验证通过后保存到当前浏览器。"
+          >
+            <input
+              type="password"
+              value={adminKeyDraft}
+              onChange={(event) => {
+                setAdminKeyDraft(event.target.value);
+                setConnectionMessage(null);
+                setConnectionError(null);
+              }}
+              disabled={isConnecting}
+              placeholder="粘贴运维密钥"
+              autoComplete="off"
+              className="h-10 w-full rounded-md border border-slate-300 bg-white px-3 font-mono text-xs text-slate-950 outline-none transition-colors focus:border-slate-950"
+            />
+          </Field>
+          <div className="flex gap-2">
+            <button type="submit" disabled={!adminKeyDraft.trim() || isConnecting} className="btn-primary">
+              {isConnecting ? '正在验证…' : '验证并连接'}
+            </button>
+            {settings.adminKey && (
+              <button type="button" onClick={disconnectOperator} disabled={isConnecting} className="btn-secondary">断开连接</button>
+            )}
+          </div>
+          {connectionMessage && <p role="status" className="text-xs text-emerald-700">{connectionMessage}</p>}
+          {connectionError && <p role="alert" className="text-xs text-rose-700">{connectionError}</p>}
+        </form>
       </section>
 
       <section className="rounded-lg border border-slate-200 bg-white p-4">

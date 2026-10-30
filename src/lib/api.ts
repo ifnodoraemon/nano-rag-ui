@@ -71,14 +71,13 @@ export interface RetrievalDebugResponse { query: string; retrieved: any[]; conte
 export interface DiagnosisResponse { target_type: string; trace_id?: string | null; sample_id?: string | null; summary: string; findings: any[]; ai_suggestion?: string | null; }
 export interface RunReportResponse { status: string; output_path?: string | null; report: any; }
 
-function getHeaders(isFormData = false): HeadersInit {
+function getHeaders(isFormData = false, adminKey = getAdminKey()): HeadersInit {
   const headers: Record<string, string> = {};
   if (!isFormData) {
     headers['Content-Type'] = 'application/json';
   }
   // Operator credential, when the operator has entered one. Business routes
   // ignore it (nginx injects the business key); admin routes require it.
-  const adminKey = getAdminKey();
   if (adminKey) {
     headers['X-Admin-API-Key'] = adminKey;
   }
@@ -86,6 +85,13 @@ function getHeaders(isFormData = false): HeadersInit {
 }
 
 const API_BASE = '';
+
+export class ApiError extends Error {
+  constructor(message: string, readonly status: number) {
+    super(message);
+    this.name = 'ApiError';
+  }
+}
 
 const scopedParams = (kbId: string) => new URLSearchParams({ kb_id: kbId });
 const sleep = (ms: number, signal?: AbortSignal) =>
@@ -116,9 +122,7 @@ async function fetchWithHandlers(url: string, options?: RequestInit) {
     if (!response.ok) {
       const errorText = await response.text();
       let errorMessage = `HTTP ${response.status} ${response.statusText}`;
-      if (response.status === 401 || response.status === 403) {
-        errorMessage = '当前请求无权访问该接口。';
-      } else if (errorText) {
+      if (errorText) {
         try {
           const parsed = JSON.parse(errorText);
           errorMessage = parsed.detail || errorMessage;
@@ -126,7 +130,14 @@ async function fetchWithHandlers(url: string, options?: RequestInit) {
           errorMessage = errorText.substring(0, 50) + '...';
         }
       }
-      throw new Error(errorMessage);
+      if (response.status === 401 && errorMessage === 'invalid or missing admin api key') {
+        errorMessage = '运维密钥缺失或已失效，请在“设置 → 运维密钥”中验证并连接。';
+      } else if (response.status === 401) {
+        errorMessage = '业务接口鉴权失败，请检查服务端代理的密钥配置。';
+      } else if (response.status === 403) {
+        errorMessage = '当前身份没有访问该资源的权限。';
+      }
+      throw new ApiError(errorMessage, response.status);
     }
     return response.json();
   } catch (error) {
@@ -247,9 +258,9 @@ export async function health(): Promise<HealthSummary> {
   return await fetchWithHandlers('/health', { headers: getHeaders() });
 }
 
-export async function healthDetail(refresh = false): Promise<HealthDetail> {
+export async function healthDetail(refresh = false, adminKey = getAdminKey()): Promise<HealthDetail> {
   const suffix = refresh ? '?refresh=true' : '';
-  return await fetchWithHandlers(`/health/detail${suffix}`, { headers: getHeaders() });
+  return await fetchWithHandlers(`/health/detail${suffix}`, { headers: getHeaders(false, adminKey) });
 }
 
 export async function listKnowledgeBases(): Promise<KnowledgeBaseSummary[]> {
